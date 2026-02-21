@@ -1,15 +1,19 @@
-# Cross-Chain Messaging + CRE Workflow Guide
+# Cross-Chain Messaging and Token Transfer + CRE Workflow Guide
 
 ## 1. Overview
-This system provides CCIP-based cross-chain messaging across 5 supported testnets, with workflow-friendly events and retry support.
+This system provides CCIP-based cross-chain messaging and token transfer across 5 supported testnets, with workflow-friendly events and retry support.
 
 Core contracts:
 - `src/MessageSender.sol`
 - `src/MessageReceiver.sol`
+- `src/TokenTransferSender.sol`
+- `src/TokenTransferReceiver.sol`
 
 Core workflow events:
 - Sender: `MessageSent`, `LinkWithdrawn`, `NativeWithdrawn`
 - Receiver: `MessageReceived`, `MessageProcessed`, `MessageProcessingFailed`, `MessageRetryRequested`, `MessageRetryCompleted`, `TokenRescued`
+- Token sender: `TokensTransferred`, `DestinationChainAllowlisted`, `TokenAllowlisted`, `ExtraArgsUpdated`
+- Token receiver: `TokensReceived`, `SourceChainAllowlisted`, `SenderAllowlisted`, `TokenWithdrawn`
 
 ## 2. Supported Networks
 The scripts use `script/utils/SupportedNetworks.sol`.
@@ -54,6 +58,30 @@ Recommended model:
 - Retry path:
   - `retryMessage(messageId)` emits retry lifecycle events
 
+### Token Sender
+- `transferTokensPayLink(...)` sends token transfer and pays CCIP fee in LINK.
+- `transferTokensPayNative(...)` sends token transfer and pays CCIP fee in native gas.
+- `TokensTransferred` now includes workflow metadata:
+  - `initiator` (original source-chain user)
+  - `extraArgsHash` (config snapshot used at send time)
+- Security checks:
+  - destination selector allowlist
+  - token allowlist
+  - sufficient LINK/native fees
+  - receiver non-zero and amount > 0
+- `extraArgs` is configurable so the same contract supports:
+  - EOA receiver flow: `gasLimit = 0`
+  - contract receiver flow: `gasLimit > 0` (for `ccipReceive` execution)
+
+### Token Receiver
+- Validates source chain and source sender with:
+  - `allowlistedSourceChains[sourceSelector]`
+  - `allowlistedSendersByChain[sourceSelector][sender]`
+- Stores each received transfer in `receivedTransfers[messageId]`
+- Stores `originSender` decoded from message payload for CRE user attribution.
+- Tracks cumulative per-token volume in `totalReceived[token]`
+- Supports owner emergency withdrawal via `withdrawToken(...)`
+
 ## 5. Environment Variables
 Required RPC/API:
 - `ETHEREUM_SEPOLIA_RPC_URL`
@@ -89,6 +117,34 @@ Verify script (`script/Verifydelivery.s.sol`):
 
 Retry script (`script/Retrymessage.s.sol`):
 - `RECEIVER_CONTRACT`
+- `MESSAGE_ID`
+
+Deploy token sender script (`script/Deploytokentransfer.s.sol:DeployTokenSender`):
+- `LOCAL_CCIP_ROUTER`
+- `LOCAL_LINK_TOKEN`
+- Optional: `LOCAL_CCIP_BNM_TOKEN`, `LOCAL_CCIP_LNM_TOKEN`
+- Optional: `PAY_FEES_IN_LINK`, `TOKEN_TRANSFER_DESTINATION_GAS_LIMIT`
+
+Deploy token receiver script (`script/Deploytokentransfer.s.sol:DeployTokenReceiver`):
+- `LOCAL_CCIP_ROUTER`
+- Optional sender addresses to pre-allowlist:
+  - `SEPOLIA_TOKEN_SENDER_CONTRACT`
+  - `AMOY_TOKEN_SENDER_CONTRACT`
+  - `ARBITRUM_SEPOLIA_TOKEN_SENDER_CONTRACT`
+  - `BASE_SEPOLIA_TOKEN_SENDER_CONTRACT`
+  - `OP_SEPOLIA_TOKEN_SENDER_CONTRACT`
+
+Send token script (`script/Sendtokens.s.sol:SendTokens`):
+- `TOKEN_SENDER_CONTRACT`
+- `TOKEN_RECEIVER_ADDRESS`
+- `TOKEN_DESTINATION_CHAIN_SELECTOR`
+- `TOKEN_ADDRESS`
+- `TOKEN_AMOUNT`
+- Optional: `TOKEN_PAY_NATIVE`, `TOKEN_NATIVE_FEE_VALUE`
+- Optional: `IS_CONTRACT_RECEIVER`, `UPDATE_TOKEN_EXTRA_ARGS`, `TOKEN_TRANSFER_DESTINATION_GAS_LIMIT`
+
+Verify token delivery script (`script/Sendtokens.s.sol:VerifyTokenDelivery`):
+- `TOKEN_RECEIVER_CONTRACT`
 - `MESSAGE_ID`
 
 ## 6. Deployment Flow (Per Chain)
@@ -132,6 +188,40 @@ RECEIVER_CONTRACT=0x... MESSAGE_ID=0x... \
 forge script script/Retrymessage.s.sol --rpc-url amoy --account deployer --broadcast -vvvv
 ```
 
+Token sender deploy:
+```bash
+forge script script/Deploytokentransfer.s.sol:DeployTokenSender \
+  --rpc-url sepolia \
+  --account deployer \
+  --broadcast \
+  -vvvv
+```
+
+Token receiver deploy:
+```bash
+forge script script/Deploytokentransfer.s.sol:DeployTokenReceiver \
+  --rpc-url amoy \
+  --account deployer \
+  --broadcast \
+  -vvvv
+```
+
+Send token transfer:
+```bash
+TOKEN_SENDER_CONTRACT=0x... \
+TOKEN_RECEIVER_ADDRESS=0x... \
+TOKEN_DESTINATION_CHAIN_SELECTOR=16281711391670634445 \
+TOKEN_ADDRESS=0x... \
+TOKEN_AMOUNT=1000000000000000000 \
+forge script script/Sendtokens.s.sol:SendTokens --rpc-url sepolia --account deployer --broadcast -vvvv
+```
+
+Verify token transfer delivery:
+```bash
+TOKEN_RECEIVER_CONTRACT=0x... MESSAGE_ID=0x... \
+forge script script/Sendtokens.s.sol:VerifyTokenDelivery --rpc-url amoy -vv
+```
+
 ## 8. CRE Workflow Integration Pattern
 Use CRE to subscribe to on-chain events and run actions.
 
@@ -143,6 +233,16 @@ Suggested workflow graph:
    - `MessageProcessingFailed` -> trigger retry policy
 4. Call `retryMessage` (owner-controlled path)
 5. Observe `MessageRetryCompleted` and close workflow
+
+Token transfer workflow graph:
+1. Trigger on `TokensTransferred` from `TokenTransferSender`
+2. For contract receiver flows:
+   - poll destination `TokensReceived`
+   - persist transfer details (`messageId`, `token`, `amount`, `sourceSelector`, `sender`)
+3. For EOA receiver flows:
+   - confirm success on `https://ccip.chain.link` for `messageId`
+   - optionally run balance checks on destination wallet
+4. Mark workflow as complete after destination confirmation
 
 ### Example CRE Workflow Pseudocode
 ```ts
@@ -193,10 +293,22 @@ Fork (requires RPC env vars):
 forge test --match-contract MessagingForkTest -vvv
 ```
 
+Token transfer local suite:
+```bash
+forge test --match-contract TokenTransferTest -vv
+```
+
+Token transfer fork suite:
+```bash
+forge test --match-contract TokenTransferForkTest -vvv
+```
+
 ## 10. Notes
 - `MessagingReceiver` sender trust is chain-aware: sender addresses are allowlisted per source chain.
 - This prevents false trust from same-address collisions across different chains.
 - Dependency warnings from vendored `lib/chainlink-local` code are expected and non-blocking.
+- Token receiver auth model is also chain-aware:
+  - `allowlistedSendersByChain[sourceSelector][sender]`
 
 ## CONTRACT ADDRESS AND TRANSACTION HASH
 
