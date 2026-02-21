@@ -55,10 +55,7 @@ contract DeploySender is Script {
 
         // Set production extraArgs with configurable gas limit.
         bytes memory productionExtraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: destinationGasLimit,
-                allowOutOfOrderExecution: false
-            })
+            Client.GenericExtraArgsV2({gasLimit: destinationGasLimit, allowOutOfOrderExecution: false})
         );
         senderContract.updateExtraArgs(productionExtraArgs);
 

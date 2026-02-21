@@ -4,8 +4,7 @@ pragma solidity 0.8.33;
 import {Test, console} from "forge-std/Test.sol";
 
 // Chainlink Local Simulator — runs CCIP entirely in Anvil, no fork needed
-import {CCIPLocalSimulator, IRouterClient, LinkToken} from
-    "@chainlink/local/ccip/CCIPLocalSimulator.sol";
+import {CCIPLocalSimulator, IRouterClient, LinkToken} from "@chainlink/local/ccip/CCIPLocalSimulator.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 
 import {MessagingSender} from "../src/MessageSender.sol";
@@ -22,25 +21,25 @@ interface IFeeConfigurableRouter {
 contract MessagingTest is Test {
     // ── CCIP local infrastructure ──────────────────────────────
     CCIPLocalSimulator public simulator;
-    IRouterClient      public sourceRouter;
-    IRouterClient      public destRouter;
-    LinkToken          public linkToken;
-    uint64             public chainSelector; // simulator uses one shared selector
+    IRouterClient public sourceRouter;
+    IRouterClient public destRouter;
+    LinkToken public linkToken;
+    uint64 public chainSelector; // simulator uses one shared selector
 
     // ── Contracts under test ───────────────────────────────────
-    MessagingSender   public sender;
+    MessagingSender public sender;
     MessagingReceiver public receiver;
 
     // ── Actors ────────────────────────────────────────────────
-    address public owner   = makeAddr("owner");
-    address public alice   = makeAddr("alice");
+    address public owner = makeAddr("owner");
+    address public alice = makeAddr("alice");
     address public attacker = makeAddr("attacker");
 
     // ── Test constants ─────────────────────────────────────────
-    string  constant HELLO_MSG    = "Hello from Chain A!";
-    uint256 constant LINK_FUND    = 10 ether;   // LINK funded to sender contract
-    uint256 constant NATIVE_FUND  = 5 ether;    // native funded to sender contract
-    uint256 constant MOCK_FEE     = 0.01 ether; // mock fee for testing
+    string constant HELLO_MSG = "Hello from Chain A!";
+    uint256 constant LINK_FUND = 10 ether; // LINK funded to sender contract
+    uint256 constant NATIVE_FUND = 5 ether; // native funded to sender contract
+    uint256 constant MOCK_FEE = 0.01 ether; // mock fee for testing
 
     // ─────────────────────────────────────────────────────────────
     //  setUp — runs before every test
@@ -51,22 +50,20 @@ contract MessagingTest is Test {
         (
             uint64 _chainSelector,
             IRouterClient _sourceRouter,
-            IRouterClient _destRouter,
-            ,                            // WETH9 wrappedNative (unused here)
-            LinkToken _linkToken,
-            ,                            // ccipBnM test token (unused here)
-                                         // ccipLnM test token (unused here)
+            IRouterClient _destRouter,, // WETH9 wrappedNative (unused here)
+            LinkToken _linkToken,, // ccipBnM test token (unused here)
+            // ccipLnM test token (unused here)
         ) = simulator.configuration();
 
         chainSelector = _chainSelector;
-        sourceRouter  = _sourceRouter;
-        destRouter    = _destRouter;
-        linkToken     = _linkToken;
+        sourceRouter = _sourceRouter;
+        destRouter = _destRouter;
+        linkToken = _linkToken;
 
         // 2. Deploy contracts as owner
         vm.startPrank(owner);
 
-        sender   = new MessagingSender(address(sourceRouter), address(linkToken), true);
+        sender = new MessagingSender(address(sourceRouter), address(linkToken), true);
         receiver = new MessagingReceiver(address(destRouter));
 
         // 3. Configure allowlists (MANDATORY — contracts silently drop without these)
@@ -90,13 +87,13 @@ contract MessagingTest is Test {
         // Labels appear in forge traces
         vm.label(address(simulator), "CCIPLocalSimulator");
         vm.label(address(sourceRouter), "SourceRouter");
-        vm.label(address(destRouter),   "DestRouter");
-        vm.label(address(linkToken),    "LinkToken");
-        vm.label(address(sender),       "MessagingSender");
-        vm.label(address(receiver),     "MessagingReceiver");
-        vm.label(owner,                 "Owner");
-        vm.label(alice,                 "Alice");
-        vm.label(attacker,              "Attacker");
+        vm.label(address(destRouter), "DestRouter");
+        vm.label(address(linkToken), "LinkToken");
+        vm.label(address(sender), "MessagingSender");
+        vm.label(address(receiver), "MessagingReceiver");
+        vm.label(owner, "Owner");
+        vm.label(alice, "Alice");
+        vm.label(attacker, "Attacker");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -133,15 +130,11 @@ contract MessagingTest is Test {
         // Verify message stored in receiver
         MessagingReceiver.ReceivedMessage memory stored = receiver.getMessage(msgId);
 
-        assertEq(stored.messageId,  msgId,          "messageId mismatch");
-        assertEq(stored.sender,     address(sender), "sender mismatch");
-        assertEq(stored.text,       HELLO_MSG,       "text mismatch");
+        assertEq(stored.messageId, msgId, "messageId mismatch");
+        assertEq(stored.sender, address(sender), "sender mismatch");
+        assertEq(stored.text, HELLO_MSG, "text mismatch");
         assertEq(stored.sourceChainSelector, chainSelector, "chain selector mismatch");
-        assertEq(
-            uint8(stored.status),
-            uint8(MessagingReceiver.MessageStatus.Processed),
-            "status should be Processed"
-        );
+        assertEq(uint8(stored.status), uint8(MessagingReceiver.MessageStatus.Processed), "status should be Processed");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -156,11 +149,7 @@ contract MessagingTest is Test {
         uint256 nativeBefore = address(sender).balance;
 
         vm.prank(owner);
-        bytes32 msgId = sender.sendMessagePayNative{value: 1 ether}(
-            chainSelector,
-            address(receiver),
-            HELLO_MSG
-        );
+        bytes32 msgId = sender.sendMessagePayNative{value: 1 ether}(chainSelector, address(receiver), HELLO_MSG);
 
         assertNotEq(msgId, bytes32(0), "messageId should be non-zero");
 
@@ -192,9 +181,7 @@ contract MessagingTest is Test {
     function test_RevertWhen_DestChainNotAllowlisted() public {
         uint64 unknownChain = 9999;
 
-        vm.expectRevert(
-            abi.encodeWithSelector(MessagingSender.DestinationChainNotAllowlisted.selector, unknownChain)
-        );
+        vm.expectRevert(abi.encodeWithSelector(MessagingSender.DestinationChainNotAllowlisted.selector, unknownChain));
         vm.prank(owner);
         sender.sendMessagePayLink(unknownChain, address(receiver), HELLO_MSG);
     }
@@ -230,9 +217,7 @@ contract MessagingTest is Test {
         assertEq(linkToken.balanceOf(address(sender)), 0, "LINK should be drained");
 
         uint256 fee = sender.estimateFee(chainSelector, address(receiver), HELLO_MSG);
-        vm.expectRevert(
-            abi.encodeWithSelector(MessagingSender.InsufficientLinkBalance.selector, 0, fee)
-        );
+        vm.expectRevert(abi.encodeWithSelector(MessagingSender.InsufficientLinkBalance.selector, 0, fee));
         vm.prank(owner);
         sender.sendMessagePayLink(chainSelector, address(receiver), HELLO_MSG);
     }
@@ -245,9 +230,7 @@ contract MessagingTest is Test {
         vm.prank(owner);
         sender.setPayFeesInLink(false);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(MessagingSender.InsufficientNativeBalance.selector, 0, MOCK_FEE)
-        );
+        vm.expectRevert(abi.encodeWithSelector(MessagingSender.InsufficientNativeBalance.selector, 0, MOCK_FEE));
         vm.prank(owner);
         sender.sendMessagePayNative{value: 0}(chainSelector, address(receiver), HELLO_MSG); // no ETH
     }
@@ -317,9 +300,7 @@ contract MessagingTest is Test {
         bytes32 msgId = sender.sendMessagePayLink(chainSelector, address(receiver), HELLO_MSG);
 
         // Attacker tries to call processMessage directly
-        vm.expectRevert(
-            abi.encodeWithSelector(MessagingReceiver.UnauthorizedCaller.selector, attacker)
-        );
+        vm.expectRevert(abi.encodeWithSelector(MessagingReceiver.UnauthorizedCaller.selector, attacker));
         vm.prank(attacker);
         receiver.processMessage(msgId);
     }
@@ -384,9 +365,8 @@ contract MessagingTest is Test {
     // ─────────────────────────────────────────────────────────────
 
     function test_UpdateExtraArgs_Succeeds() public {
-        bytes memory newArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: true})
-        );
+        bytes memory newArgs =
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: true}));
 
         vm.expectEmit(false, false, false, true);
         emit MessagingSender.ExtraArgsUpdated(newArgs);

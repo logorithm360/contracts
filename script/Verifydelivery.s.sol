@@ -17,15 +17,14 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 ///     --rpc-url <target-network> \
 ///     -vv
 contract VerifyDelivery is Script {
-
     function run() public view {
         require(SupportedNetworks.isSupportedChainId(block.chainid), "Unsupported chain");
 
         address receiverAddr = vm.envAddress("RECEIVER_CONTRACT");
-        bytes32 msgId        = vm.envBytes32("MESSAGE_ID");
+        bytes32 msgId = vm.envBytes32("MESSAGE_ID");
 
         require(receiverAddr != address(0), "RECEIVER_CONTRACT not set");
-        require(msgId != bytes32(0),        "MESSAGE_ID not set");
+        require(msgId != bytes32(0), "MESSAGE_ID not set");
 
         MessagingReceiver receiver = MessagingReceiver(receiverAddr);
 
