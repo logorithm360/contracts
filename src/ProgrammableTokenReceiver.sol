@@ -8,37 +8,61 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @title TokenTransferReceiver
-/// @notice Receives and records CCIP token transfers on destination chain.
-contract TokenTransferReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
+/// @title ProgrammableTokenReceiver
+/// @notice Receives programmable CCIP token transfers and processes payload actions.
+contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error ZeroAddress();
     error SourceChainNotAllowlisted(uint64 sourceChainSelector);
     error SenderNotAllowlisted(uint64 sourceChainSelector, address sender);
-    error NoTokensTransferred();
+    error TransferNotFound(bytes32 messageId);
+    error UnauthorizedCaller(address caller);
+    error DeadlineExpired(uint256 deadline, uint256 currentTime);
+    error UnsupportedAction(string action);
     error NothingToWithdraw();
+    error NoTokensTransferred();
+
+    struct TransferPayload {
+        address recipient;
+        string action;
+        bytes extraData;
+        uint256 deadline;
+    }
+
+    enum TransferStatus {
+        Unknown,
+        Received,
+        Processed,
+        Failed,
+        Recovered
+    }
 
     struct ReceivedTransfer {
         bytes32 messageId;
         uint64 sourceChainSelector;
-        address sender;
+        address senderContract;
         address originSender;
         address token;
         uint256 amount;
+        TransferPayload payload;
         uint256 receivedAt;
+        TransferStatus status;
     }
 
-    event TokensReceived(
+    event TransferReceived(
         bytes32 indexed messageId,
         uint64 indexed sourceChainSelector,
-        address indexed sender,
+        address indexed senderContract,
         address originSender,
         address token,
         uint256 amount,
-        uint256 runningTokenTotal,
-        uint256 transferCount
+        address recipient,
+        string action
     );
+    event TransferProcessed(bytes32 indexed messageId, string action, address recipient, uint256 amount);
+    event TransferFailed(bytes32 indexed messageId, bytes reason);
+    event TransferRecovered(bytes32 indexed messageId, address to, uint256 amount);
     event SourceChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event SenderAllowlisted(uint64 indexed sourceChainSelector, address indexed sender, bool allowed);
     event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
@@ -48,7 +72,9 @@ contract TokenTransferReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
 
     mapping(bytes32 => ReceivedTransfer) public receivedTransfers;
     bytes32[] public transferIds;
+
     mapping(address => uint256) public totalReceived;
+    mapping(address => uint256) public totalProcessed;
 
     constructor(address _router) CCIPReceiver(_router) Ownable(msg.sender) {
         if (_router == address(0)) revert ZeroAddress();
@@ -84,34 +110,78 @@ contract TokenTransferReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
     {
         if (message.destTokenAmounts.length == 0) revert NoTokensTransferred();
 
+        bytes32 msgId = message.messageId;
+        address senderContract = abi.decode(message.sender, (address));
+        (TransferPayload memory payload, address originSender) = abi.decode(message.data, (TransferPayload, address));
+
         address token = message.destTokenAmounts[0].token;
         uint256 amount = message.destTokenAmounts[0].amount;
-        address sender = abi.decode(message.sender, (address));
-        address originSender = message.data.length == 0 ? address(0) : abi.decode(message.data, (address));
-        bytes32 msgId = message.messageId;
 
         receivedTransfers[msgId] = ReceivedTransfer({
             messageId: msgId,
             sourceChainSelector: message.sourceChainSelector,
-            sender: sender,
+            senderContract: senderContract,
             originSender: originSender,
             token: token,
             amount: amount,
-            receivedAt: block.timestamp
+            payload: payload,
+            receivedAt: block.timestamp,
+            status: TransferStatus.Received
         });
         transferIds.push(msgId);
         totalReceived[token] += amount;
 
-        emit TokensReceived(
+        emit TransferReceived(
             msgId,
             message.sourceChainSelector,
-            sender,
+            senderContract,
             originSender,
             token,
             amount,
-            totalReceived[token],
-            transferIds.length
+            payload.recipient,
+            payload.action
         );
+
+        try this.processTransfer(msgId) {
+        // no-op
+        }
+        catch (bytes memory reason) {
+            receivedTransfers[msgId].status = TransferStatus.Failed;
+            emit TransferFailed(msgId, reason);
+        }
+    }
+
+    function processTransfer(bytes32 _messageId) external nonReentrant {
+        if (msg.sender != address(this) && msg.sender != owner()) {
+            revert UnauthorizedCaller(msg.sender);
+        }
+
+        ReceivedTransfer storage t = receivedTransfers[_messageId];
+        if (t.messageId == bytes32(0)) revert TransferNotFound(_messageId);
+
+        if (t.payload.deadline > 0 && block.timestamp > t.payload.deadline) {
+            revert DeadlineExpired(t.payload.deadline, block.timestamp);
+        }
+
+        string memory action = t.payload.action;
+        address recipient = t.payload.recipient;
+        address token = t.token;
+        uint256 amount = t.amount;
+
+        if (
+            _strEq(action, "transfer") || _strEq(action, "stake") || _strEq(action, "swap") || _strEq(action, "deposit")
+        ) {
+            // Phase 1 implementation forwards tokens directly.
+            // Protocol-specific integrations can replace this branch with action handlers.
+            IERC20(token).safeTransfer(recipient, amount);
+        } else {
+            revert UnsupportedAction(action);
+        }
+
+        t.status = TransferStatus.Processed;
+        totalProcessed[token] += amount;
+
+        emit TransferProcessed(_messageId, action, recipient, amount);
     }
 
     function getTransfer(bytes32 _messageId) external view returns (ReceivedTransfer memory) {
@@ -146,11 +216,30 @@ contract TokenTransferReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         emit SenderAllowlisted(_sourceChainSelector, _sender, _allowed);
     }
 
+    function recoverLockedTokens(bytes32 _messageId, address _to) external onlyOwner nonReentrant {
+        if (_to == address(0)) revert ZeroAddress();
+        ReceivedTransfer storage t = receivedTransfers[_messageId];
+        if (t.messageId == bytes32(0)) revert TransferNotFound(_messageId);
+
+        address token = t.token;
+        uint256 amount = t.amount;
+
+        t.status = TransferStatus.Recovered;
+        IERC20(token).safeTransfer(_to, amount);
+
+        emit TransferRecovered(_messageId, _to, amount);
+    }
+
     function withdrawToken(address _token, address _to) external onlyOwner nonReentrant {
         if (_token == address(0) || _to == address(0)) revert ZeroAddress();
         uint256 bal = IERC20(_token).balanceOf(address(this));
         if (bal == 0) revert NothingToWithdraw();
+
         IERC20(_token).safeTransfer(_to, bal);
         emit TokenWithdrawn(_token, _to, bal);
+    }
+
+    function _strEq(string memory a, string memory b) internal pure returns (bool) {
+        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

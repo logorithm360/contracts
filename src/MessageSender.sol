@@ -34,11 +34,11 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────
     event MessageSent(
         bytes32 indexed messageId,
-        uint64  indexed destinationChainSelector,
+        uint64 indexed destinationChainSelector,
         address indexed receiver,
-        string          text,
-        address         feeToken,
-        uint256         fees
+        string text,
+        address feeToken,
+        uint256 fees
     );
     event DestinationChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event ExtraArgsUpdated(bytes extraArgs);
@@ -72,26 +72,17 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     /// @param _router        CCIP router address on the source chain.
     /// @param _linkToken     LINK token address on the source chain.
     /// @param _payFeesInLink True → pay fees in LINK, false → pay in native gas.
-    constructor(
-        address _router,
-        address _linkToken,
-        bool    _payFeesInLink
-    ) Ownable(msg.sender) {
-        if (_router    == address(0)) revert ZeroAddress();
+    constructor(address _router, address _linkToken, bool _payFeesInLink) Ownable(msg.sender) {
+        if (_router == address(0)) revert ZeroAddress();
         if (_linkToken == address(0)) revert ZeroAddress();
 
-        I_ROUTER      = IRouterClient(_router);
-        I_LINK_TOKEN  = IERC20(_linkToken);
+        I_ROUTER = IRouterClient(_router);
+        I_LINK_TOKEN = IERC20(_linkToken);
         payFeesInLink = _payFeesInLink;
 
         // Default: 300_000 gas on destination, ordered execution.
         // Owner can update via updateExtraArgs() as CCIP evolves.
-        extraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: 300_000,
-                allowOutOfOrderExecution: false
-            })
-        );
+        extraArgs = Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 300_000, allowOutOfOrderExecution: false}));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -118,18 +109,14 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     /// @param  _receiver                  Address of the CCIPReceiver on destination.
     /// @param  _text                      UTF-8 string to send.
     /// @return messageId                  The CCIP message ID.
-    function sendMessagePayLink(
-        uint64          _destinationChainSelector,
-        address         _receiver,
-        string calldata _text
-    )
+    function sendMessagePayLink(uint64 _destinationChainSelector, address _receiver, string calldata _text)
         external
         nonReentrant
         onlyAllowlistedDestination(_destinationChainSelector)
         returns (bytes32 messageId)
     {
-        if (_receiver    == address(0)) revert ZeroAddress();
-        if (bytes(_text).length == 0)  revert EmptyData();
+        if (_receiver == address(0)) revert ZeroAddress();
+        if (bytes(_text).length == 0) revert EmptyData();
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(I_LINK_TOKEN));
 
@@ -151,19 +138,15 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     /// @param  _receiver                  Address of the CCIPReceiver on destination.
     /// @param  _text                      UTF-8 string to send.
     /// @return messageId                  The CCIP message ID.
-    function sendMessagePayNative(
-        uint64          _destinationChainSelector,
-        address         _receiver,
-        string calldata _text
-    )
+    function sendMessagePayNative(uint64 _destinationChainSelector, address _receiver, string calldata _text)
         external
         payable
         nonReentrant
         onlyAllowlistedDestination(_destinationChainSelector)
         returns (bytes32 messageId)
     {
-        if (_receiver    == address(0)) revert ZeroAddress();
-        if (bytes(_text).length == 0)  revert EmptyData();
+        if (_receiver == address(0)) revert ZeroAddress();
+        if (bytes(_text).length == 0) revert EmptyData();
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(0));
 
@@ -192,16 +175,13 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     /// @param  _receiver                  Receiver address on destination.
     /// @param  _text                      Payload string.
     /// @return fee  Fee in LINK (if payFeesInLink) or native (otherwise).
-    function estimateFee(
-        uint64          _destinationChainSelector,
-        address         _receiver,
-        string calldata _text
-    ) external view returns (uint256 fee) {
-        Client.EVM2AnyMessage memory message = _buildMessage(
-            _receiver,
-            _text,
-            payFeesInLink ? address(I_LINK_TOKEN) : address(0)
-        );
+    function estimateFee(uint64 _destinationChainSelector, address _receiver, string calldata _text)
+        external
+        view
+        returns (uint256 fee)
+    {
+        Client.EVM2AnyMessage memory message =
+            _buildMessage(_receiver, _text, payFeesInLink ? address(I_LINK_TOKEN) : address(0));
         fee = I_ROUTER.getFee(_destinationChainSelector, message);
     }
 
@@ -220,25 +200,19 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────
 
     /// @notice Allow or block a destination chain selector.
-    function allowlistDestinationChain(uint64 _chainSelector, bool _allowed)
-        external onlyOwner
-    {
+    function allowlistDestinationChain(uint64 _chainSelector, bool _allowed) external onlyOwner {
         allowlistedDestinationChains[_chainSelector] = _allowed;
         emit DestinationChainAllowlisted(_chainSelector, _allowed);
     }
 
     /// @notice Update extraArgs to stay compatible with future CCIP upgrades.
-    function updateExtraArgs(bytes calldata _extraArgs)
-        external onlyOwner
-    {
+    function updateExtraArgs(bytes calldata _extraArgs) external onlyOwner {
         extraArgs = _extraArgs;
         emit ExtraArgsUpdated(_extraArgs);
     }
 
     /// @notice Switch fee payment between LINK and native gas.
-    function setPayFeesInLink(bool _payInLink)
-        external onlyOwner
-    {
+    function setPayFeesInLink(bool _payInLink) external onlyOwner {
         payFeesInLink = _payInLink;
         emit FeeConfigUpdated(_payInLink);
     }
@@ -269,17 +243,17 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     //  Internal helpers
     // ─────────────────────────────────────────────────────────────
 
-    function _buildMessage(
-        address       _receiver,
-        string memory _text,
-        address       _feeToken
-    ) internal view returns (Client.EVM2AnyMessage memory) {
+    function _buildMessage(address _receiver, string memory _text, address _feeToken)
+        internal
+        view
+        returns (Client.EVM2AnyMessage memory)
+    {
         return Client.EVM2AnyMessage({
-            receiver:     abi.encode(_receiver),             // must be abi.encode
-            data:         abi.encode(_text),
-            tokenAmounts: new Client.EVMTokenAmount[](0),    // no tokens, messages only
-            extraArgs:    extraArgs,                          // mutable — never hardcoded
-            feeToken:     _feeToken                          // address(0) = native gas
+            receiver: abi.encode(_receiver), // must be abi.encode
+            data: abi.encode(_text),
+            tokenAmounts: new Client.EVMTokenAmount[](0), // no tokens, messages only
+            extraArgs: extraArgs, // mutable — never hardcoded
+            feeToken: _feeToken // address(0) = native gas
         });
     }
 }

@@ -70,10 +70,7 @@ contract DeployTokenSender is Script {
 
         // gasLimit = 0 for EOA receiver flows. Set >0 for contract receivers.
         bytes memory transferExtraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: destinationGasLimit,
-                allowOutOfOrderExecution: false
-            })
+            Client.GenericExtraArgsV2({gasLimit: destinationGasLimit, allowOutOfOrderExecution: false})
         );
         senderContract.updateExtraArgs(transferExtraArgs);
 

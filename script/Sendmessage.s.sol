@@ -20,10 +20,7 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 ///   forge script script/Sendmessage.s.sol --rpc-url sepolia --account deployer --broadcast -vvvv
 contract SendMessage is Script {
     function run() public returns (bytes32 messageId) {
-        require(
-            SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported source chain"
-        );
+        require(SupportedNetworks.isSupportedChainId(block.chainid), "Unsupported source chain");
 
         address senderAddr = vm.envAddress("SENDER_CONTRACT");
         address receiverAddr = vm.envAddress("RECEIVER_CONTRACT");
@@ -37,10 +34,7 @@ contract SendMessage is Script {
 
         MessagingSender sender = MessagingSender(payable(senderAddr));
 
-        require(
-            sender.allowlistedDestinationChains(destinationSelector),
-            "Destination chain not allowlisted in sender"
-        );
+        require(sender.allowlistedDestinationChains(destinationSelector), "Destination chain not allowlisted in sender");
 
         uint256 estimatedFee = sender.estimateFee(destinationSelector, receiverAddr, text);
         console.log("Estimated fee:", estimatedFee);

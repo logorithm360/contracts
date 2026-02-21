@@ -15,10 +15,8 @@ library SupportedNetworks {
     uint64 internal constant OP_SEPOLIA_SELECTOR = 5224473277236331295;
 
     function isSupportedChainId(uint256 chainId) internal pure returns (bool) {
-        return chainId == ETHEREUM_SEPOLIA_CHAIN_ID
-            || chainId == POLYGON_AMOY_CHAIN_ID
-            || chainId == ARBITRUM_SEPOLIA_CHAIN_ID
-            || chainId == BASE_SEPOLIA_CHAIN_ID
+        return chainId == ETHEREUM_SEPOLIA_CHAIN_ID || chainId == POLYGON_AMOY_CHAIN_ID
+            || chainId == ARBITRUM_SEPOLIA_CHAIN_ID || chainId == BASE_SEPOLIA_CHAIN_ID
             || chainId == OP_SEPOLIA_CHAIN_ID;
     }
 

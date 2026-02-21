@@ -8,14 +8,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @title TokenTransferSender
-/// @notice Sends ERC20 token transfers cross-chain via CCIP.
-/// @dev Deployed on source chain. Supports LINK fees or native fees.
-contract TokenTransferSender is Ownable, ReentrancyGuard {
+/// @title ProgrammableTokenSender
+/// @notice Sends CCIP programmable token transfers (token + instruction payload).
+contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error ZeroAddress();
     error ZeroAmount();
+    error EmptyPayload();
     error NothingToWithdraw();
     error WithdrawFailed();
     error DestinationChainNotAllowlisted(uint64 chainSelector);
@@ -24,13 +24,22 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
     error InsufficientNativeBalance(uint256 sent, uint256 need);
     error RefundFailed();
 
-    event TokensTransferred(
+    struct TransferPayload {
+        address recipient;
+        string action;
+        bytes extraData;
+        uint256 deadline;
+    }
+
+    event ProgrammableTransferSent(
         bytes32 indexed messageId,
         uint64 indexed destinationChainSelector,
-        address indexed receiver,
+        address indexed receiverContract,
         address initiator,
         address token,
         uint256 tokenAmount,
+        address payloadRecipient,
+        string action,
         address feeToken,
         uint256 fees,
         bytes32 extraArgsHash
@@ -59,8 +68,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         I_LINK_TOKEN = IERC20(_linkToken);
         payFeesInLink = _payFeesInLink;
 
-        // gasLimit=0 default for EOA receivers in token-only transfers.
-        extraArgs = Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 0, allowOutOfOrderExecution: false}));
+        extraArgs = Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: false}));
     }
 
     modifier onlyAllowlistedDestination(uint64 _chainSelector) {
@@ -85,30 +93,32 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         }
     }
 
-    function transferTokensPayLink(uint64 _destinationChainSelector, address _receiver, address _token, uint256 _amount)
+    function sendPayLink(
+        uint64 _destinationChainSelector,
+        address _receiverContract,
+        address _token,
+        uint256 _amount,
+        TransferPayload calldata _payload
+    )
         external
         nonReentrant
         onlyAllowlistedDestination(_destinationChainSelector)
         onlyAllowlistedToken(_token)
         returns (bytes32 messageId)
     {
-        if (_receiver == address(0)) revert ZeroAddress();
-        if (_amount == 0) revert ZeroAmount();
+        _validateInputs(_receiverContract, _amount, _payload);
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
         Client.EVM2AnyMessage memory message =
-            _buildTokenMessage(_receiver, _token, _amount, address(I_LINK_TOKEN), msg.sender);
+            _buildMessage(_receiverContract, _token, _amount, _payload, address(I_LINK_TOKEN), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
 
-        if (_token == address(I_LINK_TOKEN)) {
-            uint256 totalLinkNeeded = fees + _amount;
-            if (I_LINK_TOKEN.balanceOf(address(this)) < totalLinkNeeded) {
-                revert InsufficientLinkBalance(I_LINK_TOKEN.balanceOf(address(this)), totalLinkNeeded);
-            }
-        } else if (I_LINK_TOKEN.balanceOf(address(this)) < fees) {
-            revert InsufficientLinkBalance(I_LINK_TOKEN.balanceOf(address(this)), fees);
+        uint256 linkRequired = (_token == address(I_LINK_TOKEN)) ? fees + _amount : fees;
+
+        if (I_LINK_TOKEN.balanceOf(address(this)) < linkRequired) {
+            revert InsufficientLinkBalance(I_LINK_TOKEN.balanceOf(address(this)), linkRequired);
         }
 
         I_LINK_TOKEN.approve(address(I_ROUTER), fees);
@@ -116,24 +126,27 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
 
         messageId = I_ROUTER.ccipSend(_destinationChainSelector, message);
 
-        emit TokensTransferred(
+        emit ProgrammableTransferSent(
             messageId,
             _destinationChainSelector,
-            _receiver,
+            _receiverContract,
             msg.sender,
             _token,
             _amount,
+            _payload.recipient,
+            _payload.action,
             address(I_LINK_TOKEN),
             fees,
             keccak256(extraArgs)
         );
     }
 
-    function transferTokensPayNative(
+    function sendPayNative(
         uint64 _destinationChainSelector,
-        address _receiver,
+        address _receiverContract,
         address _token,
-        uint256 _amount
+        uint256 _amount,
+        TransferPayload calldata _payload
     )
         external
         payable
@@ -142,12 +155,12 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         onlyAllowlistedToken(_token)
         returns (bytes32 messageId)
     {
-        if (_receiver == address(0)) revert ZeroAddress();
-        if (_amount == 0) revert ZeroAmount();
+        _validateInputs(_receiverContract, _amount, _payload);
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        Client.EVM2AnyMessage memory message = _buildTokenMessage(_receiver, _token, _amount, address(0), msg.sender);
+        Client.EVM2AnyMessage memory message =
+            _buildMessage(_receiverContract, _token, _amount, _payload, address(0), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
         if (msg.value < fees) {
@@ -162,27 +175,32 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
             if (!ok) revert RefundFailed();
         }
 
-        emit TokensTransferred(
+        emit ProgrammableTransferSent(
             messageId,
             _destinationChainSelector,
-            _receiver,
+            _receiverContract,
             msg.sender,
             _token,
             _amount,
+            _payload.recipient,
+            _payload.action,
             address(0),
             fees,
             keccak256(extraArgs)
         );
     }
 
-    function estimateFee(uint64 _destinationChainSelector, address _receiver, address _token, uint256 _amount)
-        external
-        view
-        returns (uint256 fee)
-    {
-        Client.EVM2AnyMessage memory message = _buildTokenMessage(
-            _receiver, _token, _amount, payFeesInLink ? address(I_LINK_TOKEN) : address(0), msg.sender
+    function estimateFee(
+        uint64 _destinationChainSelector,
+        address _receiverContract,
+        address _token,
+        uint256 _amount,
+        TransferPayload calldata _payload
+    ) external view returns (uint256 fee) {
+        Client.EVM2AnyMessage memory message = _buildMessage(
+            _receiverContract, _token, _amount, _payload, payFeesInLink ? address(I_LINK_TOKEN) : address(0), msg.sender
         );
+
         fee = I_ROUTER.getFee(_destinationChainSelector, message);
     }
 
@@ -219,6 +237,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         if (_to == address(0)) revert ZeroAddress();
         uint256 bal = I_LINK_TOKEN.balanceOf(address(this));
         if (bal == 0) revert NothingToWithdraw();
+
         I_LINK_TOKEN.safeTransfer(_to, bal);
         emit LinkWithdrawn(_to, bal);
     }
@@ -227,25 +246,35 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         if (_to == address(0)) revert ZeroAddress();
         uint256 bal = address(this).balance;
         if (bal == 0) revert NothingToWithdraw();
+
         (bool ok,) = _to.call{value: bal}("");
         if (!ok) revert WithdrawFailed();
         emit NativeWithdrawn(_to, bal);
     }
 
     function withdrawToken(address _token, address _to) external onlyOwner {
-        if (_token == address(0) || _to == address(0)) revert ZeroAddress();
+        if (_to == address(0) || _token == address(0)) revert ZeroAddress();
         uint256 bal = IERC20(_token).balanceOf(address(this));
         if (bal == 0) revert NothingToWithdraw();
+
         IERC20(_token).safeTransfer(_to, bal);
         emit TokenWithdrawn(_token, _to, bal);
     }
 
     receive() external payable {}
 
-    function _buildTokenMessage(
+    function _validateInputs(address _receiver, uint256 _amount, TransferPayload calldata _payload) internal pure {
+        if (_receiver == address(0)) revert ZeroAddress();
+        if (_amount == 0) revert ZeroAmount();
+        if (_payload.recipient == address(0)) revert ZeroAddress();
+        if (bytes(_payload.action).length == 0) revert EmptyPayload();
+    }
+
+    function _buildMessage(
         address _receiver,
         address _token,
         uint256 _amount,
+        TransferPayload calldata _payload,
         address _feeToken,
         address _originSender
     ) internal view returns (Client.EVM2AnyMessage memory) {
@@ -254,8 +283,8 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
 
         return Client.EVM2AnyMessage({
             receiver: abi.encode(_receiver),
-            // CRE workflows can correlate destination delivery to the user who initiated on source chain.
-            data: abi.encode(_originSender),
+            // data includes both transfer instructions and source initiator for CRE/workflow reconciliation.
+            data: abi.encode(_payload, _originSender),
             tokenAmounts: tokenAmounts,
             extraArgs: extraArgs,
             feeToken: _feeToken
