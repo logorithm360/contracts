@@ -3,8 +3,12 @@ pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
 
-import {CCIPLocalSimulator, IRouterClient, LinkToken, BurnMintERC677Helper} from
-    "@chainlink/local/ccip/CCIPLocalSimulator.sol";
+import {
+    CCIPLocalSimulator,
+    IRouterClient,
+    LinkToken,
+    BurnMintERC677Helper
+} from "@chainlink/local/ccip/CCIPLocalSimulator.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -41,11 +45,9 @@ contract TokenTransferTest is Test {
         (
             uint64 _chainSelector,
             IRouterClient _sourceRouter,
-            IRouterClient _destRouter,
-            ,
+            IRouterClient _destRouter,,
             LinkToken _linkToken,
             BurnMintERC677Helper _ccipBnM,
-
         ) = simulator.configuration();
 
         chainSelector = _chainSelector;
@@ -88,9 +90,7 @@ contract TokenTransferTest is Test {
     function _setContractReceiverGasLimit() internal {
         vm.prank(owner);
         sender.updateExtraArgs(
-            Client._argsToBytes(
-                Client.GenericExtraArgsV2({gasLimit: 300_000, allowOutOfOrderExecution: false})
-            )
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 300_000, allowOutOfOrderExecution: false}))
         );
     }
 
@@ -159,22 +159,12 @@ contract TokenTransferTest is Test {
 
         vm.startPrank(alice);
         IERC20(address(ccipBnM)).approve(address(sender), aliceAmount);
-        bytes32 id1 = sender.transferTokensPayLink(
-            chainSelector,
-            address(receiver),
-            address(ccipBnM),
-            aliceAmount
-        );
+        bytes32 id1 = sender.transferTokensPayLink(chainSelector, address(receiver), address(ccipBnM), aliceAmount);
         vm.stopPrank();
 
         vm.startPrank(bob);
         IERC20(address(ccipBnM)).approve(address(sender), bobAmount);
-        bytes32 id2 = sender.transferTokensPayLink(
-            chainSelector,
-            address(receiver),
-            address(ccipBnM),
-            bobAmount
-        );
+        bytes32 id2 = sender.transferTokensPayLink(chainSelector, address(receiver), address(ccipBnM), bobAmount);
         vm.stopPrank();
 
         TokenTransferReceiver.ReceivedTransfer memory first = receiver.getTransfer(id1);
@@ -211,9 +201,7 @@ contract TokenTransferTest is Test {
     function test_RevertWhen_TokenNotAllowlisted() public {
         address randomToken = makeAddr("randomToken");
 
-        vm.expectRevert(
-            abi.encodeWithSelector(TokenTransferSender.TokenNotAllowlisted.selector, randomToken)
-        );
+        vm.expectRevert(abi.encodeWithSelector(TokenTransferSender.TokenNotAllowlisted.selector, randomToken));
         vm.prank(alice);
         sender.transferTokensPayLink(chainSelector, bob, randomToken, 1 ether);
     }
@@ -240,9 +228,7 @@ contract TokenTransferTest is Test {
         vm.startPrank(alice);
         IERC20(address(ccipBnM)).approve(address(sender), amount);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(TokenTransferSender.InsufficientLinkBalance.selector, 0, fee)
-        );
+        vm.expectRevert(abi.encodeWithSelector(TokenTransferSender.InsufficientLinkBalance.selector, 0, fee));
         sender.transferTokensPayLink(chainSelector, bob, address(ccipBnM), amount);
         vm.stopPrank();
     }
@@ -256,9 +242,7 @@ contract TokenTransferTest is Test {
         vm.startPrank(alice);
         IERC20(address(ccipBnM)).approve(address(sender), amount);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(TokenTransferSender.InsufficientNativeBalance.selector, 0, MOCK_FEE)
-        );
+        vm.expectRevert(abi.encodeWithSelector(TokenTransferSender.InsufficientNativeBalance.selector, 0, MOCK_FEE));
         sender.transferTokensPayNative{value: 0}(chainSelector, bob, address(ccipBnM), amount);
         vm.stopPrank();
     }

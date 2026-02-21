@@ -87,9 +87,7 @@ contract TokenTransferReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         address token = message.destTokenAmounts[0].token;
         uint256 amount = message.destTokenAmounts[0].amount;
         address sender = abi.decode(message.sender, (address));
-        address originSender = message.data.length == 0
-            ? address(0)
-            : abi.decode(message.data, (address));
+        address originSender = message.data.length == 0 ? address(0) : abi.decode(message.data, (address));
         bytes32 msgId = message.messageId;
 
         receivedTransfers[msgId] = ReceivedTransfer({

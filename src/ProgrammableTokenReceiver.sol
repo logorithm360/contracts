@@ -112,8 +112,7 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
 
         bytes32 msgId = message.messageId;
         address senderContract = abi.decode(message.sender, (address));
-        (TransferPayload memory payload, address originSender) =
-            abi.decode(message.data, (TransferPayload, address));
+        (TransferPayload memory payload, address originSender) = abi.decode(message.data, (TransferPayload, address));
 
         address token = message.destTokenAmounts[0].token;
         uint256 amount = message.destTokenAmounts[0].amount;
@@ -144,8 +143,9 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         );
 
         try this.processTransfer(msgId) {
-            // no-op
-        } catch (bytes memory reason) {
+        // no-op
+        }
+        catch (bytes memory reason) {
             receivedTransfers[msgId].status = TransferStatus.Failed;
             emit TransferFailed(msgId, reason);
         }
@@ -168,7 +168,9 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         address token = t.token;
         uint256 amount = t.amount;
 
-        if (_strEq(action, "transfer") || _strEq(action, "stake") || _strEq(action, "swap") || _strEq(action, "deposit")) {
+        if (
+            _strEq(action, "transfer") || _strEq(action, "stake") || _strEq(action, "swap") || _strEq(action, "deposit")
+        ) {
             // Phase 1 implementation forwards tokens directly.
             // Protocol-specific integrations can replace this branch with action handlers.
             IERC20(token).safeTransfer(recipient, amount);

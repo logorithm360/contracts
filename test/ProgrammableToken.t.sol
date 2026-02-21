@@ -3,8 +3,12 @@ pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
 
-import {CCIPLocalSimulator, IRouterClient, LinkToken, BurnMintERC677Helper} from
-    "@chainlink/local/ccip/CCIPLocalSimulator.sol";
+import {
+    CCIPLocalSimulator,
+    IRouterClient,
+    LinkToken,
+    BurnMintERC677Helper
+} from "@chainlink/local/ccip/CCIPLocalSimulator.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -40,11 +44,9 @@ contract ProgrammableTokenTest is Test {
         (
             uint64 _chainSelector,
             IRouterClient _srcRouter,
-            IRouterClient _dstRouter,
-            ,
+            IRouterClient _dstRouter,,
             LinkToken _link,
             BurnMintERC677Helper _bnm,
-
         ) = simulator.configuration();
 
         chainSelector = _chainSelector;
@@ -82,10 +84,7 @@ contract ProgrammableTokenTest is Test {
         returns (ProgrammableTokenSender.TransferPayload memory)
     {
         return ProgrammableTokenSender.TransferPayload({
-            recipient: recipient,
-            action: action,
-            extraData: "",
-            deadline: block.timestamp + 1 hours
+            recipient: recipient, action: action, extraData: "", deadline: block.timestamp + 1 hours
         });
     }
 
@@ -102,13 +101,7 @@ contract ProgrammableTokenTest is Test {
 
         vm.startPrank(caller);
         IERC20(token).approve(address(sender), amount);
-        messageId = sender.sendPayLink(
-            chainSelector,
-            address(receiver),
-            token,
-            amount,
-            payload
-        );
+        messageId = sender.sendPayLink(chainSelector, address(receiver), token, amount, payload);
         vm.stopPrank();
     }
 
@@ -171,13 +164,8 @@ contract ProgrammableTokenTest is Test {
 
         vm.startPrank(alice);
         ccipBnM.approve(address(sender), amount);
-        bytes32 msgId = sender.sendPayNative{value: fee + 1}(
-            chainSelector,
-            address(receiver),
-            address(ccipBnM),
-            amount,
-            payload
-        );
+        bytes32 msgId =
+            sender.sendPayNative{value: fee + 1}(chainSelector, address(receiver), address(ccipBnM), amount, payload);
         vm.stopPrank();
 
         assertNotEq(msgId, bytes32(0));
@@ -208,10 +196,7 @@ contract ProgrammableTokenTest is Test {
         uint256 amount = ccipBnM.balanceOf(alice);
 
         ProgrammableTokenSender.TransferPayload memory expiredPayload = ProgrammableTokenSender.TransferPayload({
-            recipient: bob,
-            action: "transfer",
-            extraData: "",
-            deadline: block.timestamp - 1
+            recipient: bob, action: "transfer", extraData: "", deadline: block.timestamp - 1
         });
 
         simulator.requestLinkFromFaucet(address(sender), 5 ether);
@@ -266,9 +251,7 @@ contract ProgrammableTokenTest is Test {
         address fakeToken = makeAddr("fakeToken");
         ProgrammableTokenSender.TransferPayload memory payload = _makePayload(bob, "transfer");
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ProgrammableTokenSender.TokenNotAllowlisted.selector, fakeToken)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ProgrammableTokenSender.TokenNotAllowlisted.selector, fakeToken));
         vm.prank(alice);
         sender.sendPayLink(chainSelector, address(receiver), fakeToken, 1 ether, payload);
     }
@@ -282,10 +265,7 @@ contract ProgrammableTokenTest is Test {
 
     function test_RevertWhen_EmptyPayloadAction() public {
         ProgrammableTokenSender.TransferPayload memory payload = ProgrammableTokenSender.TransferPayload({
-            recipient: bob,
-            action: "",
-            extraData: "",
-            deadline: block.timestamp + 1 hours
+            recipient: bob, action: "", extraData: "", deadline: block.timestamp + 1 hours
         });
 
         vm.expectRevert(ProgrammableTokenSender.EmptyPayload.selector);
@@ -295,10 +275,7 @@ contract ProgrammableTokenTest is Test {
 
     function test_RevertWhen_ZeroPayloadRecipient() public {
         ProgrammableTokenSender.TransferPayload memory payload = ProgrammableTokenSender.TransferPayload({
-            recipient: address(0),
-            action: "transfer",
-            extraData: "",
-            deadline: block.timestamp + 1 hours
+            recipient: address(0), action: "transfer", extraData: "", deadline: block.timestamp + 1 hours
         });
 
         vm.expectRevert(ProgrammableTokenSender.ZeroAddress.selector);
@@ -310,9 +287,7 @@ contract ProgrammableTokenTest is Test {
         uint256 amount = ccipBnM.balanceOf(alice);
         bytes32 msgId = _sendTokensWithPayload(alice, address(ccipBnM), amount, bob, "transfer");
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ProgrammableTokenReceiver.UnauthorizedCaller.selector, attacker)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ProgrammableTokenReceiver.UnauthorizedCaller.selector, attacker));
         vm.prank(attacker);
         receiver.processTransfer(msgId);
     }
@@ -328,19 +303,10 @@ contract ProgrammableTokenTest is Test {
 
     function test_EstimateFee_ReturnsNonZero() public view {
         ProgrammableTokenSender.TransferPayload memory payload = ProgrammableTokenSender.TransferPayload({
-            recipient: bob,
-            action: "transfer",
-            extraData: "",
-            deadline: block.timestamp + 1 hours
+            recipient: bob, action: "transfer", extraData: "", deadline: block.timestamp + 1 hours
         });
 
-        uint256 fee = sender.estimateFee(
-            chainSelector,
-            address(receiver),
-            address(ccipBnM),
-            1 ether,
-            payload
-        );
+        uint256 fee = sender.estimateFee(chainSelector, address(receiver), address(ccipBnM), 1 ether, payload);
         assertGt(fee, 0);
     }
 
@@ -362,12 +328,7 @@ contract ProgrammableTokenTest is Test {
     function test_TransferToContract_ExtraArgsConfigurable() public {
         vm.prank(owner);
         sender.updateExtraArgs(
-            Client._argsToBytes(
-                Client.GenericExtraArgsV2({
-                    gasLimit: 800_000,
-                    allowOutOfOrderExecution: false
-                })
-            )
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 800_000, allowOutOfOrderExecution: false}))
         );
 
         uint256 amount = ccipBnM.balanceOf(alice);

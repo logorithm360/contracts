@@ -33,7 +33,7 @@ contract MessagingForkTest is Test {
     Register.NetworkDetails public amoyDetails;
 
     // ── Contracts under test ───────────────────────────────────
-    MessagingSender   public sender;   // on Sepolia
+    MessagingSender public sender; // on Sepolia
     MessagingReceiver public receiver; // on Amoy
 
     // ── Actors ────────────────────────────────────────────────
@@ -45,7 +45,7 @@ contract MessagingForkTest is Test {
     function setUp() public {
         // 1. Create both forks (do NOT select yet)
         sepoliaFork = vm.createFork(vm.envString("ETHEREUM_SEPOLIA_RPC_URL"));
-        amoyFork    = vm.createFork(vm.envString("POLYGON_AMOY_RPC_URL"));
+        amoyFork = vm.createFork(vm.envString("POLYGON_AMOY_RPC_URL"));
 
         // 2. Select destination (Amoy) first to deploy receiver
         vm.selectFork(amoyFork);
@@ -75,7 +75,7 @@ contract MessagingForkTest is Test {
         sender = new MessagingSender(
             sepoliaDetails.routerAddress,
             sepoliaDetails.linkAddress,
-            true  // pay fees in LINK
+            true // pay fees in LINK
         );
 
         // 8. Configure allowlists on sender (Sepolia side)
@@ -109,11 +109,7 @@ contract MessagingForkTest is Test {
         string memory text = "Hello from Sepolia to Amoy!";
 
         vm.prank(owner);
-        bytes32 msgId = sender.sendMessagePayLink(
-            amoyDetails.chainSelector,
-            address(receiver),
-            text
-        );
+        bytes32 msgId = sender.sendMessagePayLink(amoyDetails.chainSelector, address(receiver), text);
 
         assertNotEq(msgId, bytes32(0), "messageId should be non-zero");
         console.log("Sent messageId:", vm.toString(msgId));
@@ -127,15 +123,11 @@ contract MessagingForkTest is Test {
 
         MessagingReceiver.ReceivedMessage memory stored = receiver.getMessage(msgId);
 
-        assertEq(stored.messageId,  msgId,          "messageId mismatch on receiver");
-        assertEq(stored.sender,     address(sender), "sender address mismatch");
-        assertEq(stored.text,       text,            "text mismatch on receiver");
+        assertEq(stored.messageId, msgId, "messageId mismatch on receiver");
+        assertEq(stored.sender, address(sender), "sender address mismatch");
+        assertEq(stored.text, text, "text mismatch on receiver");
         assertEq(stored.sourceChainSelector, sepoliaDetails.chainSelector, "chain selector mismatch");
-        assertEq(
-            uint8(stored.status),
-            uint8(MessagingReceiver.MessageStatus.Processed),
-            "status should be Processed"
-        );
+        assertEq(uint8(stored.status), uint8(MessagingReceiver.MessageStatus.Processed), "status should be Processed");
 
         console.log("Message delivered and processed on Amoy!");
         console.log("Received text:", stored.text);
@@ -174,11 +166,7 @@ contract MessagingForkTest is Test {
 
         vm.startPrank(owner);
         for (uint256 i = 0; i < 3; i++) {
-            ids[i] = sender.sendMessagePayLink(
-                amoyDetails.chainSelector,
-                address(receiver),
-                texts[i]
-            );
+            ids[i] = sender.sendMessagePayLink(amoyDetails.chainSelector, address(receiver), texts[i]);
         }
         vm.stopPrank();
 

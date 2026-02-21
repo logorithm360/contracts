@@ -60,9 +60,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         payFeesInLink = _payFeesInLink;
 
         // gasLimit=0 default for EOA receivers in token-only transfers.
-        extraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({gasLimit: 0, allowOutOfOrderExecution: false})
-        );
+        extraArgs = Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 0, allowOutOfOrderExecution: false}));
     }
 
     modifier onlyAllowlistedDestination(uint64 _chainSelector) {
@@ -87,12 +85,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         }
     }
 
-    function transferTokensPayLink(
-        uint64 _destinationChainSelector,
-        address _receiver,
-        address _token,
-        uint256 _amount
-    )
+    function transferTokensPayLink(uint64 _destinationChainSelector, address _receiver, address _token, uint256 _amount)
         external
         nonReentrant
         onlyAllowlistedDestination(_destinationChainSelector)
@@ -104,13 +97,8 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        Client.EVM2AnyMessage memory message = _buildTokenMessage(
-            _receiver,
-            _token,
-            _amount,
-            address(I_LINK_TOKEN),
-            msg.sender
-        );
+        Client.EVM2AnyMessage memory message =
+            _buildTokenMessage(_receiver, _token, _amount, address(I_LINK_TOKEN), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
 
@@ -159,8 +147,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        Client.EVM2AnyMessage memory message =
-            _buildTokenMessage(_receiver, _token, _amount, address(0), msg.sender);
+        Client.EVM2AnyMessage memory message = _buildTokenMessage(_receiver, _token, _amount, address(0), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
         if (msg.value < fees) {
@@ -188,18 +175,13 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         );
     }
 
-    function estimateFee(
-        uint64 _destinationChainSelector,
-        address _receiver,
-        address _token,
-        uint256 _amount
-    ) external view returns (uint256 fee) {
+    function estimateFee(uint64 _destinationChainSelector, address _receiver, address _token, uint256 _amount)
+        external
+        view
+        returns (uint256 fee)
+    {
         Client.EVM2AnyMessage memory message = _buildTokenMessage(
-            _receiver,
-            _token,
-            _amount,
-            payFeesInLink ? address(I_LINK_TOKEN) : address(0),
-            msg.sender
+            _receiver, _token, _amount, payFeesInLink ? address(I_LINK_TOKEN) : address(0), msg.sender
         );
         fee = I_ROUTER.getFee(_destinationChainSelector, message);
     }

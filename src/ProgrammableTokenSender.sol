@@ -68,9 +68,7 @@ contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
         I_LINK_TOKEN = IERC20(_linkToken);
         payFeesInLink = _payFeesInLink;
 
-        extraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: false})
-        );
+        extraArgs = Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: false}));
     }
 
     modifier onlyAllowlistedDestination(uint64 _chainSelector) {
@@ -112,14 +110,8 @@ contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        Client.EVM2AnyMessage memory message = _buildMessage(
-            _receiverContract,
-            _token,
-            _amount,
-            _payload,
-            address(I_LINK_TOKEN),
-            msg.sender
-        );
+        Client.EVM2AnyMessage memory message =
+            _buildMessage(_receiverContract, _token, _amount, _payload, address(I_LINK_TOKEN), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
 
@@ -167,14 +159,8 @@ contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        Client.EVM2AnyMessage memory message = _buildMessage(
-            _receiverContract,
-            _token,
-            _amount,
-            _payload,
-            address(0),
-            msg.sender
-        );
+        Client.EVM2AnyMessage memory message =
+            _buildMessage(_receiverContract, _token, _amount, _payload, address(0), msg.sender);
 
         uint256 fees = I_ROUTER.getFee(_destinationChainSelector, message);
         if (msg.value < fees) {
@@ -212,12 +198,7 @@ contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
         TransferPayload calldata _payload
     ) external view returns (uint256 fee) {
         Client.EVM2AnyMessage memory message = _buildMessage(
-            _receiverContract,
-            _token,
-            _amount,
-            _payload,
-            payFeesInLink ? address(I_LINK_TOKEN) : address(0),
-            msg.sender
+            _receiverContract, _token, _amount, _payload, payFeesInLink ? address(I_LINK_TOKEN) : address(0), msg.sender
         );
 
         fee = I_ROUTER.getFee(_destinationChainSelector, message);
@@ -282,11 +263,7 @@ contract ProgrammableTokenSender is Ownable, ReentrancyGuard {
 
     receive() external payable {}
 
-    function _validateInputs(
-        address _receiver,
-        uint256 _amount,
-        TransferPayload calldata _payload
-    ) internal pure {
+    function _validateInputs(address _receiver, uint256 _amount, TransferPayload calldata _payload) internal pure {
         if (_receiver == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         if (_payload.recipient == address(0)) revert ZeroAddress();

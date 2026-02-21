@@ -48,10 +48,7 @@ contract DeployProgrammableSender is Script {
         if (localLnm != address(0)) senderContract.allowlistToken(localLnm, true);
 
         bytes memory programmableExtraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: destinationGasLimit,
-                allowOutOfOrderExecution: false
-            })
+            Client.GenericExtraArgsV2({gasLimit: destinationGasLimit, allowOutOfOrderExecution: false})
         );
         senderContract.updateExtraArgs(programmableExtraArgs);
 
@@ -160,27 +157,14 @@ contract SendProgrammable is Script {
         require(sender.allowlistedTokens(p.tokenAddr), "Token not allowlisted in programmable sender");
 
         uint256 gasLimit = vm.envOr("PROGRAMMABLE_DESTINATION_GAS_LIMIT", uint256(500_000));
-        bytes memory nextExtraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: gasLimit,
-                allowOutOfOrderExecution: false
-            })
-        );
+        bytes memory nextExtraArgs =
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: gasLimit, allowOutOfOrderExecution: false}));
 
         ProgrammableTokenSender.TransferPayload memory payload = ProgrammableTokenSender.TransferPayload({
-            recipient: p.payloadRecipient,
-            action: p.action,
-            extraData: "",
-            deadline: p.deadline
+            recipient: p.payloadRecipient, action: p.action, extraData: "", deadline: p.deadline
         });
 
-        uint256 estimatedFee = sender.estimateFee(
-            p.destinationSelector,
-            p.receiverAddr,
-            p.tokenAddr,
-            p.amount,
-            payload
-        );
+        uint256 estimatedFee = sender.estimateFee(p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount, payload);
 
         console.log("Estimated fee:", estimatedFee);
         console.log("Pay mode:     ", p.payNative ? "native" : "LINK");
@@ -199,20 +183,10 @@ contract SendProgrammable is Script {
         if (p.payNative) {
             uint256 nativeFeeValue = vm.envOr("PROGRAMMABLE_NATIVE_FEE_VALUE", estimatedFee);
             messageId = sender.sendPayNative{value: nativeFeeValue}(
-                p.destinationSelector,
-                p.receiverAddr,
-                p.tokenAddr,
-                p.amount,
-                payload
+                p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount, payload
             );
         } else {
-            messageId = sender.sendPayLink(
-                p.destinationSelector,
-                p.receiverAddr,
-                p.tokenAddr,
-                p.amount,
-                payload
-            );
+            messageId = sender.sendPayLink(p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount, payload);
         }
 
         vm.stopBroadcast();

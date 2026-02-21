@@ -52,23 +52,11 @@ contract SendTokens is Script {
         );
         require(sender.allowlistedTokens(p.tokenAddr), "Token not allowlisted in token sender");
 
-        uint256 gasLimit = vm.envOr(
-            "TOKEN_TRANSFER_DESTINATION_GAS_LIMIT",
-            uint256(p.isContractReceiver ? 300_000 : 0)
-        );
-        bytes memory nextExtraArgs = Client._argsToBytes(
-            Client.GenericExtraArgsV2({
-                gasLimit: gasLimit,
-                allowOutOfOrderExecution: false
-            })
-        );
+        uint256 gasLimit = vm.envOr("TOKEN_TRANSFER_DESTINATION_GAS_LIMIT", uint256(p.isContractReceiver ? 300_000 : 0));
+        bytes memory nextExtraArgs =
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: gasLimit, allowOutOfOrderExecution: false}));
 
-        uint256 estimatedFee = sender.estimateFee(
-            p.destinationSelector,
-            p.receiverAddr,
-            p.tokenAddr,
-            p.amount
-        );
+        uint256 estimatedFee = sender.estimateFee(p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount);
         console.log("Estimated fee:", estimatedFee);
         console.log("Pay mode:     ", p.payNative ? "native" : "LINK");
         console.log("Gas limit:    ", gasLimit);
@@ -85,18 +73,10 @@ contract SendTokens is Script {
         if (p.payNative) {
             uint256 nativeFeeValue = vm.envOr("TOKEN_NATIVE_FEE_VALUE", estimatedFee);
             messageId = sender.transferTokensPayNative{value: nativeFeeValue}(
-                p.destinationSelector,
-                p.receiverAddr,
-                p.tokenAddr,
-                p.amount
+                p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount
             );
         } else {
-            messageId = sender.transferTokensPayLink(
-                p.destinationSelector,
-                p.receiverAddr,
-                p.tokenAddr,
-                p.amount
-            );
+            messageId = sender.transferTokensPayLink(p.destinationSelector, p.receiverAddr, p.tokenAddr, p.amount);
         }
 
         vm.stopBroadcast();

@@ -53,9 +53,7 @@ contract TokenTransferForkTest is Test {
 
         // Contract receiver flow needs gasLimit > 0.
         sender.updateExtraArgs(
-            Client._argsToBytes(
-                Client.GenericExtraArgsV2({gasLimit: 300_000, allowOutOfOrderExecution: false})
-            )
+            Client._argsToBytes(Client.GenericExtraArgsV2({gasLimit: 300_000, allowOutOfOrderExecution: false}))
         );
         vm.stopPrank();
 
@@ -86,10 +84,7 @@ contract TokenTransferForkTest is Test {
         vm.startPrank(alice);
         IERC20(sepoliaDetails.ccipBnMAddress).approve(address(sender), amount);
         bytes32 msgId = sender.transferTokensPayLink(
-            amoyDetails.chainSelector,
-            address(receiver),
-            sepoliaDetails.ccipBnMAddress,
-            amount
+            amoyDetails.chainSelector, address(receiver), sepoliaDetails.ccipBnMAddress, amount
         );
         vm.stopPrank();
 
