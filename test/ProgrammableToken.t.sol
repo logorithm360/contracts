@@ -135,6 +135,21 @@ contract ProgrammableTokenTest is Test {
         assertEq(uint8(t.status), uint8(ProgrammableTokenReceiver.TransferStatus.Processed));
     }
 
+    function test_StakeAction_ManualMode_RequestsActionAndLocksTokens() public {
+        vm.prank(owner);
+        receiver.setManualActionSender(chainSelector, address(sender), true);
+
+        uint256 amount = ccipBnM.balanceOf(alice);
+        bytes32 msgId = _sendTokensWithPayload(alice, address(ccipBnM), amount, bob, "stake");
+
+        ProgrammableTokenReceiver.ReceivedTransfer memory t = receiver.getTransfer(msgId);
+        assertEq(t.payload.action, "stake");
+        assertEq(uint8(t.status), uint8(ProgrammableTokenReceiver.TransferStatus.PendingAction));
+        assertEq(ccipBnM.balanceOf(bob), 0);
+        assertEq(receiver.getTokenBalance(address(ccipBnM)), amount);
+        assertEq(receiver.totalProcessed(address(ccipBnM)), 0);
+    }
+
     function test_SwapAction_Succeeds() public {
         uint256 amount = ccipBnM.balanceOf(alice);
         bytes32 msgId = _sendTokensWithPayload(alice, address(ccipBnM), amount, bob, "swap");

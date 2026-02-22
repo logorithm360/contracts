@@ -254,8 +254,9 @@ contract VerifyProgrammable is Script {
             uint8 s = uint8(t.status);
             if (s == 2) statusLabel = "Processed";
             else if (s == 1) statusLabel = "Received (pending)";
-            else if (s == 3) statusLabel = "FAILED (tokens locked)";
-            else if (s == 4) statusLabel = "Recovered";
+            else if (s == 3) statusLabel = "PendingAction (awaiting CRE execution)";
+            else if (s == 4) statusLabel = "FAILED (tokens locked)";
+            else if (s == 5) statusLabel = "Recovered";
             else statusLabel = "Unknown";
 
             console.log("STATUS:            ", statusLabel);

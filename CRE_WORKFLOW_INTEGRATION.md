@@ -8,12 +8,16 @@ Core contracts:
 - `src/MessageReceiver.sol`
 - `src/TokenTransferSender.sol`
 - `src/TokenTransferReceiver.sol`
+- `src/AutomatedTrader.sol`
+- `src/ProgrammableTokenReceiver.sol`
 
 Core workflow events:
 - Sender: `MessageSent`, `LinkWithdrawn`, `NativeWithdrawn`
 - Receiver: `MessageReceived`, `MessageProcessed`, `MessageProcessingFailed`, `MessageRetryRequested`, `MessageRetryCompleted`, `TokenRescued`
 - Token sender: `TokensTransferred`, `DestinationChainAllowlisted`, `TokenAllowlisted`, `ExtraArgsUpdated`
 - Token receiver: `TokensReceived`, `SourceChainAllowlisted`, `SenderAllowlisted`, `TokenWithdrawn`
+- Automated trader: `OrderCreated`, `OrderExecuted`, `OrderSkipped`, `OrderExecutionFailed`, `UpkeepExecutionStarted`, `UpkeepExecutionFinished`
+- Programmable receiver automation hook: `ActionRequested` (manual action mode for automated senders)
 
 ## 2. Supported Networks
 The scripts use `script/utils/SupportedNetworks.sol`.
@@ -147,6 +151,31 @@ Verify token delivery script (`script/Sendtokens.s.sol:VerifyTokenDelivery`):
 - `TOKEN_RECEIVER_CONTRACT`
 - `MESSAGE_ID`
 
+Automated trading scripts (`script/Deployautomation.s.sol`):
+- Deploy:
+  - `LOCAL_CCIP_ROUTER`
+  - `LOCAL_LINK_TOKEN`
+  - Optional: `LOCAL_CCIP_BNM_TOKEN`, `LOCAL_CCIP_LNM_TOKEN`, `AUTOMATED_DESTINATION_GAS_LIMIT`, `AUTOMATED_MAX_PRICE_AGE`, `AUTOMATED_PRICE_FEED`
+- Forwarder:
+  - `AUTOMATED_TRADER_CONTRACT`
+  - `AUTOMATION_FORWARDER_ADDRESS`
+- Receiver integration:
+  - `AUTOMATED_RECEIVER_CONTRACT`
+  - `AUTOMATED_TRADER_CONTRACT`
+  - Optional: `AUTOMATED_SOURCE_SELECTOR`, `AUTOMATED_ENABLE_MANUAL_ACTION_MODE`
+- Order creation:
+  - `AUTOMATED_TRADER_CONTRACT`
+  - `AUTOMATED_DESTINATION_SELECTOR`
+  - `AUTOMATED_RECEIVER_CONTRACT`
+  - `AUTOMATED_TOKEN_ADDRESS`
+  - `AUTOMATED_TOKEN_AMOUNT`
+  - `AUTOMATED_ACTION`
+  - `AUTOMATED_RECIPIENT`
+  - Timed: `AUTOMATED_INTERVAL_SECONDS`
+  - Price: `AUTOMATED_PRICE_FEED`, `AUTOMATED_PRICE_THRESHOLD`, `AUTOMATED_EXECUTE_ABOVE`
+  - Balance: `AUTOMATED_BALANCE_REQUIRED`
+  - Optional: `AUTOMATED_RECURRING`, `AUTOMATED_MAX_EXECUTIONS`, `AUTOMATED_DEADLINE`
+
 ## 6. Deployment Flow (Per Chain)
 Deploy sender on each source network:
 ```bash
@@ -243,6 +272,14 @@ Token transfer workflow graph:
    - confirm success on `https://ccip.chain.link` for `messageId`
    - optionally run balance checks on destination wallet
 4. Mark workflow as complete after destination confirmation
+
+Automated trading workflow graph:
+1. Trigger on `UpkeepExecutionFinished` / `OrderExecuted` from `AutomatedTrader`
+2. Resolve `messageId` and correlate with destination `TransferReceived`
+3. Branch:
+   - `TransferProcessed` -> success
+   - `ActionRequested` -> CRE executes destination protocol action and updates workflow state
+   - `TransferFailed` -> retry/recovery policy
 
 ### Example CRE Workflow Pseudocode
 ```ts
