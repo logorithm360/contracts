@@ -194,6 +194,47 @@ contract AutomatedTradingTest is Test {
         assertFalse(neededSecond, "price below threshold should not trigger");
     }
 
+    function test_CreatePriceOrderForToken_UsesMappedFeed() public {
+        vm.prank(owner);
+        trader.setTokenPriceFeed(address(ccipBnM), address(priceFeed), true);
+
+        vm.prank(owner);
+        trader.createPriceOrderForToken(
+            1900e18,
+            true,
+            address(ccipBnM),
+            TOKEN_AMOUNT,
+            chainSelector,
+            address(receiver),
+            alice,
+            "transfer",
+            false,
+            1,
+            0
+        );
+
+        (bool needed,) = trader.checkUpkeep("");
+        assertTrue(needed, "mapped feed should make order executable");
+    }
+
+    function test_CreatePriceOrderForToken_RevertsIfNotMapped() public {
+        vm.expectRevert(abi.encodeWithSelector(AutomatedTrader.PriceFeedNotConfigured.selector, address(ccipBnM)));
+        vm.prank(owner);
+        trader.createPriceOrderForToken(
+            1900e18,
+            true,
+            address(ccipBnM),
+            TOKEN_AMOUNT,
+            chainSelector,
+            address(receiver),
+            alice,
+            "transfer",
+            false,
+            1,
+            0
+        );
+    }
+
     function test_PriceOrder_SkipsOnStaleOrInvalidPrice() public {
         vm.warp(1000);
 

@@ -202,7 +202,7 @@ contract CreatePriceOrder is Script {
         address recipient = vm.envAddress("AUTOMATED_RECIPIENT");
         string memory action = vm.envString("AUTOMATED_ACTION");
 
-        address priceFeed = vm.envAddress("AUTOMATED_PRICE_FEED");
+        address priceFeed = vm.envOr("AUTOMATED_PRICE_FEED", address(0));
         uint256 priceThreshold = vm.envUint("AUTOMATED_PRICE_THRESHOLD");
         bool executeAbove = vm.envOr("AUTOMATED_EXECUTE_ABOVE", true);
         bool recurring = vm.envOr("AUTOMATED_RECURRING", false);
@@ -217,7 +217,10 @@ contract CreatePriceOrder is Script {
         require(receiverAddr != address(0), "AUTOMATED_RECEIVER_CONTRACT not set");
         require(recipient != address(0), "AUTOMATED_RECIPIENT not set");
         require(amount > 0, "AUTOMATED_TOKEN_AMOUNT must be > 0");
-        require(priceFeed != address(0), "AUTOMATED_PRICE_FEED not set");
+        if (priceFeed == address(0)) {
+            priceFeed = trader.tokenPriceFeeds(tokenAddr);
+        }
+        require(priceFeed != address(0), "Price feed not set (env or token mapping)");
 
         require(trader.allowlistedDestinationChains(destinationSelector), "Destination selector not allowlisted");
         require(trader.allowlistedTokens(tokenAddr), "Token not allowlisted");
@@ -242,7 +245,36 @@ contract CreatePriceOrder is Script {
 
         uint256 estimatedFee = trader.estimateFee(orderId);
         console.log("Price order created:", orderId);
+        console.log("Price feed used:", priceFeed);
         console.log("Estimated LINK fee:", estimatedFee);
+    }
+}
+
+/// @notice Maps token -> price feed for default price-order creation and optionally allowlists the feed.
+contract SetTokenPriceFeed is Script {
+    function run() external {
+        require(
+            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
+            "SetTokenPriceFeed must run on Ethereum Sepolia"
+        );
+
+        address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
+        address tokenAddr = vm.envAddress("AUTOMATED_TOKEN_ADDRESS");
+        address priceFeed = vm.envAddress("AUTOMATED_PRICE_FEED");
+        bool allowlistFeed = vm.envOr("AUTOMATED_ALLOWLIST_PRICE_FEED", true);
+
+        require(traderAddr != address(0), "AUTOMATED_TRADER_CONTRACT not set");
+        require(tokenAddr != address(0), "AUTOMATED_TOKEN_ADDRESS not set");
+        require(priceFeed != address(0), "AUTOMATED_PRICE_FEED not set");
+
+        vm.startBroadcast();
+        AutomatedTrader(payable(traderAddr)).setTokenPriceFeed(tokenAddr, priceFeed, allowlistFeed);
+        vm.stopBroadcast();
+
+        console.log("Token price feed mapped:");
+        console.log("  token:", tokenAddr);
+        console.log("  feed: ", priceFeed);
+        console.log("  allowlisted:", allowlistFeed);
     }
 }
 

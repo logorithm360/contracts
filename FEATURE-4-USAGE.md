@@ -115,6 +115,24 @@ cast call 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05 "balanceOf(address)(uint256
 
 ---
 
+## Step 3.1: Map token to price feed (for price-trigger orders)
+This is optional for timed/balance orders, but recommended for reusable price setup.
+
+```bash
+AUTOMATED_TRADER_CONTRACT=<SEPOLIA_TRADER_ADDRESS> \
+AUTOMATED_TOKEN_ADDRESS=0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05 \
+AUTOMATED_PRICE_FEED=0x694AA1769357215DE4FAC081bf1f309aDC325306 \
+AUTOMATED_ALLOWLIST_PRICE_FEED=true \
+forge script script/Deployautomation.s.sol:SetTokenPriceFeed \
+  --rpc-url sepolia \
+  --account deployer \
+  --broadcast \
+  --slow \
+  -vvvv
+```
+
+---
+
 ## Step 4: Create a timed order
 Example one-time transfer from Sepolia to Amoy.
 
@@ -139,6 +157,31 @@ forge script script/Deployautomation.s.sol:CreateTimedOrder \
 
 Expected log:
 - `Timed order created: <orderId>`
+
+---
+
+## Step 4.1: Create a price order
+You can set `AUTOMATED_PRICE_FEED` explicitly, or omit it if you already mapped token -> feed in Step 3.1.
+
+```bash
+AUTOMATED_TRADER_CONTRACT=<SEPOLIA_TRADER_ADDRESS> \
+AUTOMATED_DESTINATION_SELECTOR=16281711391670634445 \
+AUTOMATED_RECEIVER_CONTRACT=<AMOY_RECEIVER_ADDRESS> \
+AUTOMATED_TOKEN_ADDRESS=0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05 \
+AUTOMATED_TOKEN_AMOUNT=100000000000000000 \
+AUTOMATED_RECIPIENT=<AMOY_RECIPIENT_ADDRESS> \
+AUTOMATED_ACTION=transfer \
+AUTOMATED_PRICE_THRESHOLD=1900000000000000000000 \
+AUTOMATED_EXECUTE_ABOVE=true \
+AUTOMATED_RECURRING=false \
+AUTOMATED_MAX_EXECUTIONS=1 \
+forge script script/Deployautomation.s.sol:CreatePriceOrder \
+  --rpc-url sepolia \
+  --account deployer \
+  --broadcast \
+  --slow \
+  -vvvv
+```
 
 ---
 
@@ -245,4 +288,3 @@ Search that message ID on:
 4. Trigger upkeep
 5. Wait for CCIP finality
 6. Verify count + recipient token balance
-

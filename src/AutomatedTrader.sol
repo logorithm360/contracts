@@ -27,6 +27,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     error DestinationChainNotAllowlisted(uint64 chainSelector);
     error TokenNotAllowlisted(address token);
     error PriceFeedNotAllowlisted(address priceFeed);
+    error PriceFeedNotConfigured(address token);
     error InvalidOrderType();
     error MaxOrdersReached();
     error InvalidPriceThreshold();
@@ -134,6 +135,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     event DestinationChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event TokenAllowlisted(address indexed token, bool allowed);
     event PriceFeedAllowlisted(address indexed feed, bool allowed);
+    event TokenPriceFeedSet(address indexed token, address indexed feed);
     event MaxPriceAgeUpdated(uint256 maxPriceAge);
     event ExtraArgsUpdated(bytes extraArgs);
 
@@ -145,6 +147,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     mapping(uint64 => bool) public allowlistedDestinationChains;
     mapping(address => bool) public allowlistedTokens;
     mapping(address => bool) public allowlistedPriceFeeds;
+    mapping(address => address) public tokenPriceFeeds;
 
     mapping(uint256 => TradeOrder) public orders;
     uint256[] public activeOrderIds;
@@ -287,6 +290,68 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         uint256 _maxExecutions,
         uint256 _deadline
     ) external onlyOwner returns (uint256 orderId) {
+        orderId = _createPriceOrder(
+            _priceFeed,
+            _priceThreshold,
+            _executeAbove,
+            _token,
+            _amount,
+            _destinationChain,
+            _receiverContract,
+            _recipient,
+            _action,
+            _recurring,
+            _maxExecutions,
+            _deadline
+        );
+    }
+
+    function createPriceOrderForToken(
+        uint256 _priceThreshold,
+        bool _executeAbove,
+        address _token,
+        uint256 _amount,
+        uint64 _destinationChain,
+        address _receiverContract,
+        address _recipient,
+        string calldata _action,
+        bool _recurring,
+        uint256 _maxExecutions,
+        uint256 _deadline
+    ) external onlyOwner returns (uint256 orderId) {
+        address mappedFeed = tokenPriceFeeds[_token];
+        if (mappedFeed == address(0)) revert PriceFeedNotConfigured(_token);
+
+        orderId = _createPriceOrder(
+            mappedFeed,
+            _priceThreshold,
+            _executeAbove,
+            _token,
+            _amount,
+            _destinationChain,
+            _receiverContract,
+            _recipient,
+            _action,
+            _recurring,
+            _maxExecutions,
+            _deadline
+        );
+    }
+
+    function _createPriceOrder(
+        address _priceFeed,
+        uint256 _priceThreshold,
+        bool _executeAbove,
+        address _token,
+        uint256 _amount,
+        uint64 _destinationChain,
+        address _receiverContract,
+        address _recipient,
+        string calldata _action,
+        bool _recurring,
+        uint256 _maxExecutions,
+        uint256 _deadline
+    ) internal returns (uint256 orderId) {
         _validateOrderInputs(_token, _amount, _destinationChain, _receiverContract, _recipient, _action);
         if (_priceThreshold == 0) revert InvalidPriceThreshold();
         if (_priceFeed == address(0)) revert ZeroAddress();
@@ -450,6 +515,19 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         if (_feed == address(0)) revert ZeroAddress();
         allowlistedPriceFeeds[_feed] = _allowed;
         emit PriceFeedAllowlisted(_feed, _allowed);
+    }
+
+    function setTokenPriceFeed(address _token, address _feed, bool _allowlistFeed) external onlyOwner {
+        if (_token == address(0) || _feed == address(0)) revert ZeroAddress();
+        if (!allowlistedTokens[_token]) revert TokenNotAllowlisted(_token);
+
+        tokenPriceFeeds[_token] = _feed;
+        emit TokenPriceFeedSet(_token, _feed);
+
+        if (_allowlistFeed && !allowlistedPriceFeeds[_feed]) {
+            allowlistedPriceFeeds[_feed] = true;
+            emit PriceFeedAllowlisted(_feed, true);
+        }
     }
 
     function setMaxPriceAge(uint256 _maxPriceAge) external onlyOwner {

@@ -24,6 +24,7 @@ Core controls:
 - destination chain allowlist
 - transferable token allowlist
 - price feed allowlist
+- token -> price feed mapping
 - max feed staleness (`maxPriceAge`)
 - configurable `extraArgs`
 - forwarder gating for `performUpkeep`
@@ -57,12 +58,14 @@ High-level fields:
 Order creation APIs:
 - `createTimedOrder(...)`
 - `createPriceOrder(...)`
+- `createPriceOrderForToken(...)`
 - `createBalanceOrder(...)`
 
 Operational APIs:
 - `cancelOrder(...)`, `pauseOrder(...)`, `resumeOrder(...)`
 - `estimateFee(orderId)`
 - `getOrder(orderId)`, `getActiveOrderCount()`, `getLinkBalance()`
+- `setTokenPriceFeed(token, feed, allowlistFeed)`
 
 ## 4. Trigger Evaluation Logic
 
@@ -154,6 +157,7 @@ All feature-4 scripts are in `script/Deployautomation.s.sol`:
 - `CreateBalanceOrder`
 - `CheckAutomationStatus`
 - `TriggerAutomationUpkeep` (owner-side pre-forwarder live trigger)
+- `SetTokenPriceFeed`
 
 ### Environment variables
 Deployment/config:
@@ -164,6 +168,7 @@ Deployment/config:
 - `AUTOMATED_DESTINATION_GAS_LIMIT` (optional, default `500000`)
 - `AUTOMATED_MAX_PRICE_AGE` (optional, default `3600`)
 - `AUTOMATED_PRICE_FEED` (optional initial feed allowlist)
+- `AUTOMATED_ALLOWLIST_PRICE_FEED` (optional, default `true`)
 
 Forwarder:
 - `AUTOMATED_TRADER_CONTRACT`
@@ -189,6 +194,12 @@ Order creation:
 - `AUTOMATED_RECURRING` (optional)
 - `AUTOMATED_MAX_EXECUTIONS` (optional)
 - `AUTOMATED_DEADLINE` (optional)
+
+Price-feed mapping:
+- `AUTOMATED_TRADER_CONTRACT`
+- `AUTOMATED_TOKEN_ADDRESS`
+- `AUTOMATED_PRICE_FEED`
+- `AUTOMATED_ALLOWLIST_PRICE_FEED` (optional, default `true`)
 
 ## 9. Testing Strategy
 

@@ -55,6 +55,7 @@ Deployment/config:
 - `AUTOMATED_DESTINATION_GAS_LIMIT` (optional, default `500000`)
 - `AUTOMATED_MAX_PRICE_AGE` (optional, default `3600`)
 - `AUTOMATED_PRICE_FEED` (optional initial feed allowlist)
+- `AUTOMATED_ALLOWLIST_PRICE_FEED` (optional, default `true`)
 
 Forwarder:
 - `AUTOMATED_TRADER_CONTRACT`
@@ -83,6 +84,12 @@ Order creation:
 - `AUTOMATED_MAX_EXECUTIONS` (optional)
 - `AUTOMATED_DEADLINE` (optional)
 
+Price-feed mapping:
+- `AUTOMATED_TRADER_CONTRACT`
+- `AUTOMATED_TOKEN_ADDRESS`
+- `AUTOMATED_PRICE_FEED`
+- `AUTOMATED_ALLOWLIST_PRICE_FEED` (optional, default `true`)
+
 ## 6. Scripts
 All scripts are in `script/Deployautomation.s.sol`:
 1. `DeployAutomatedTrader`
@@ -92,6 +99,7 @@ All scripts are in `script/Deployautomation.s.sol`:
 5. `CreatePriceOrder`
 6. `CreateBalanceOrder`
 7. `CheckAutomationStatus`
+8. `SetTokenPriceFeed`
 
 ## 7. Example Flow
 1. Deploy source trader on Sepolia.
@@ -108,6 +116,7 @@ All scripts are in `script/Deployautomation.s.sol`:
 - Threshold is stored as 18-decimal normalized value.
 - Contract validates feed freshness with `maxPriceAge`.
 - Invalid/stale feeds do not revert upkeep globally; orders are skipped with reason events.
+- You can map token -> default feed once via `setTokenPriceFeed(...)` and then omit `AUTOMATED_PRICE_FEED` in `CreatePriceOrder`.
 
 ## 9. Validation Commands
 ```bash
