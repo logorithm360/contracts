@@ -10,6 +10,7 @@ Core contracts:
 - `src/TokenTransferReceiver.sol`
 - `src/AutomatedTrader.sol`
 - `src/ProgrammableTokenReceiver.sol`
+- `src/UserRecordRegistry.sol`
 
 Core workflow events:
 - Sender: `MessageSent`, `LinkWithdrawn`, `NativeWithdrawn`
@@ -18,6 +19,7 @@ Core workflow events:
 - Token receiver: `TokensReceived`, `SourceChainAllowlisted`, `SenderAllowlisted`, `TokenWithdrawn`
 - Automated trader: `OrderCreated`, `OrderExecuted`, `OrderSkipped`, `OrderExecutionFailed`, `UpkeepExecutionStarted`, `UpkeepExecutionFinished`
 - Programmable receiver automation hook: `ActionRequested` (manual action mode for automated senders)
+- Storage registry: `ProfileCommitmentUpdated`, `RecordAppended`, `SystemWriterRoleUpdated`
 
 ## 2. Supported Networks
 The scripts use `script/utils/SupportedNetworks.sol`.
@@ -176,6 +178,29 @@ Automated trading scripts (`script/Deployautomation.s.sol`):
   - Balance: `AUTOMATED_BALANCE_REQUIRED`
   - Optional: `AUTOMATED_RECURRING`, `AUTOMATED_MAX_EXECUTIONS`, `AUTOMATED_DEADLINE`
 
+Storage scripts (`script/Deploystorage.s.sol`):
+- Deploy/config:
+  - `USER_RECORD_REGISTRY_CONTRACT`
+  - `SYSTEM_WRITER_ADDRESS`
+- Profile:
+  - `PROFILE_COMMITMENT_HASH`
+- Single append:
+  - `RECORD_USER`
+  - `RECORD_FEATURE_TYPE`
+  - `RECORD_CHAIN_SELECTOR`
+  - `RECORD_SOURCE_CONTRACT`
+  - `RECORD_COUNTERPARTY`
+  - `RECORD_MESSAGE_ID`
+  - `RECORD_ASSET_TOKEN`
+  - `RECORD_AMOUNT`
+  - `RECORD_ACTION_HASH`
+  - `RECORD_STATUS`
+  - `RECORD_METADATA_HASH`
+  - `RECORD_EXTERNAL_EVENT_KEY`
+- Batch append:
+  - `RECORD_BATCH_COUNT`
+  - indexed vars with suffix `_0..._N`
+
 ## 6. Deployment Flow (Per Chain)
 Deploy sender on each source network:
 ```bash
@@ -280,6 +305,24 @@ Automated trading workflow graph:
    - `TransferProcessed` -> success
    - `ActionRequested` -> CRE executes destination protocol action and updates workflow state
    - `TransferFailed` -> retry/recovery policy
+
+Feature 5 storage ingestion workflow graph:
+1. Subscribe to Feature 1-4 events from source and destination chains.
+2. Normalize payloads into `UserRecordRegistry.RecordInput`.
+3. Compute deterministic `externalEventKey` for idempotent writes.
+4. Write with `appendRecord` or `appendRecordsBatch`.
+5. On duplicate key revert, mark ingestion as already-completed.
+6. Read user timeline from `getUserRecordIds` + `getRecord`.
+
+Feature 5 state model:
+- `CREATED`: order/message intent created
+- `SENT`: source-chain send executed
+- `RECEIVED`: destination receive observed
+- `PROCESSED`: destination processing completed
+- `PENDING_ACTION`: destination manual action required (`ActionRequested`)
+- `FAILED`: failed execution path
+- `RETRY`: retry lifecycle initiated
+- `RECOVERED`: manual/owner recovery flow completed
 
 ### Example CRE Workflow Pseudocode
 ```ts
