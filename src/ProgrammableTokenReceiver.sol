@@ -34,6 +34,7 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         Unknown,
         Received,
         Processed,
+        PendingAction,
         Failed,
         Recovered
     }
@@ -61,14 +62,19 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         string action
     );
     event TransferProcessed(bytes32 indexed messageId, string action, address recipient, uint256 amount);
+    event ActionRequested(
+        bytes32 indexed messageId, string action, address recipient, address token, uint256 amount, bytes extraData
+    );
     event TransferFailed(bytes32 indexed messageId, bytes reason);
     event TransferRecovered(bytes32 indexed messageId, address to, uint256 amount);
     event SourceChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event SenderAllowlisted(uint64 indexed sourceChainSelector, address indexed sender, bool allowed);
+    event ManualActionSenderUpdated(uint64 indexed sourceChainSelector, address indexed sender, bool enabled);
     event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     mapping(uint64 => bool) public allowlistedSourceChains;
     mapping(uint64 => mapping(address => bool)) public allowlistedSendersByChain;
+    mapping(uint64 => mapping(address => bool)) public manualActionSendersByChain;
 
     mapping(bytes32 => ReceivedTransfer) public receivedTransfers;
     bytes32[] public transferIds;
@@ -168,20 +174,31 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         address token = t.token;
         uint256 amount = t.amount;
 
-        if (
-            _strEq(action, "transfer") || _strEq(action, "stake") || _strEq(action, "swap") || _strEq(action, "deposit")
-        ) {
-            // Phase 1 implementation forwards tokens directly.
-            // Protocol-specific integrations can replace this branch with action handlers.
+        if (_strEq(action, "transfer")) {
             IERC20(token).safeTransfer(recipient, amount);
-        } else {
-            revert UnsupportedAction(action);
+            t.status = TransferStatus.Processed;
+            totalProcessed[token] += amount;
+            emit TransferProcessed(_messageId, action, recipient, amount);
+            return;
         }
 
-        t.status = TransferStatus.Processed;
-        totalProcessed[token] += amount;
+        if (_strEq(action, "stake") || _strEq(action, "swap") || _strEq(action, "deposit")) {
+            if (manualActionSendersByChain[t.sourceChainSelector][t.senderContract]) {
+                // Automated sender mode: hold funds until CRE executes destination action.
+                t.status = TransferStatus.PendingAction;
+                emit ActionRequested(_messageId, action, recipient, token, amount, t.payload.extraData);
+                return;
+            }
 
-        emit TransferProcessed(_messageId, action, recipient, amount);
+            // Backward compatibility for existing feature-3 programmable flows.
+            IERC20(token).safeTransfer(recipient, amount);
+            t.status = TransferStatus.Processed;
+            totalProcessed[token] += amount;
+            emit TransferProcessed(_messageId, action, recipient, amount);
+            return;
+        }
+
+        revert UnsupportedAction(action);
     }
 
     function getTransfer(bytes32 _messageId) external view returns (ReceivedTransfer memory) {
@@ -214,6 +231,12 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         if (_sender == address(0)) revert ZeroAddress();
         allowlistedSendersByChain[_sourceChainSelector][_sender] = _allowed;
         emit SenderAllowlisted(_sourceChainSelector, _sender, _allowed);
+    }
+
+    function setManualActionSender(uint64 _sourceChainSelector, address _sender, bool _enabled) external onlyOwner {
+        if (_sender == address(0)) revert ZeroAddress();
+        manualActionSendersByChain[_sourceChainSelector][_sender] = _enabled;
+        emit ManualActionSenderUpdated(_sourceChainSelector, _sender, _enabled);
     }
 
     function recoverLockedTokens(bytes32 _messageId, address _to) external onlyOwner nonReentrant {
