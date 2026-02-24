@@ -37,6 +37,8 @@ contract DeployTokenSender is Script {
         address localLink = vm.envAddress("LOCAL_LINK_TOKEN");
         bool payInLink = vm.envOr("PAY_FEES_IN_LINK", true);
         uint256 destinationGasLimit = vm.envOr("TOKEN_TRANSFER_DESTINATION_GAS_LIMIT", uint256(0));
+        address securityManager = vm.envOr("SECURITY_MANAGER_CONTRACT", address(0));
+        address tokenVerifier = vm.envOr("TOKEN_VERIFIER_CONTRACT", address(0));
 
         address localBnm = vm.envOr("LOCAL_CCIP_BNM_TOKEN", address(0));
         address localLnm = vm.envOr("LOCAL_CCIP_LNM_TOKEN", address(0));
@@ -74,6 +76,10 @@ contract DeployTokenSender is Script {
         );
         senderContract.updateExtraArgs(transferExtraArgs);
 
+        if (securityManager != address(0) || tokenVerifier != address(0)) {
+            senderContract.configureSecurity(securityManager, tokenVerifier);
+        }
+
         vm.stopBroadcast();
 
         require(senderContract.getRouter() == localRouter, "router mismatch");
@@ -84,6 +90,8 @@ contract DeployTokenSender is Script {
         console.log("Router:                        ", localRouter);
         console.log("LINK token:                    ", localLink);
         console.log("Default token-transfer gasLimit:", destinationGasLimit);
+        console.log("Security manager:               ", securityManager);
+        console.log("Token verifier:                 ", tokenVerifier);
         console.log("=============================================");
         console.log("Allowlisted destination selectors:");
         for (uint256 i = 0; i < selectors.length; i++) {
