@@ -8,12 +8,18 @@ Core contracts:
 - `src/MessageReceiver.sol`
 - `src/TokenTransferSender.sol`
 - `src/TokenTransferReceiver.sol`
+- `src/AutomatedTrader.sol`
+- `src/ProgrammableTokenReceiver.sol`
+- `src/UserRecordRegistry.sol`
 
 Core workflow events:
 - Sender: `MessageSent`, `LinkWithdrawn`, `NativeWithdrawn`
 - Receiver: `MessageReceived`, `MessageProcessed`, `MessageProcessingFailed`, `MessageRetryRequested`, `MessageRetryCompleted`, `TokenRescued`
 - Token sender: `TokensTransferred`, `DestinationChainAllowlisted`, `TokenAllowlisted`, `ExtraArgsUpdated`
 - Token receiver: `TokensReceived`, `SourceChainAllowlisted`, `SenderAllowlisted`, `TokenWithdrawn`
+- Automated trader: `OrderCreated`, `OrderExecuted`, `OrderSkipped`, `OrderExecutionFailed`, `UpkeepExecutionStarted`, `UpkeepExecutionFinished`
+- Programmable receiver automation hook: `ActionRequested` (manual action mode for automated senders)
+- Storage registry: `ProfileCommitmentUpdated`, `RecordAppended`, `SystemWriterRoleUpdated`
 
 ## 2. Supported Networks
 The scripts use `script/utils/SupportedNetworks.sol`.
@@ -147,6 +153,54 @@ Verify token delivery script (`script/Sendtokens.s.sol:VerifyTokenDelivery`):
 - `TOKEN_RECEIVER_CONTRACT`
 - `MESSAGE_ID`
 
+Automated trading scripts (`script/Deployautomation.s.sol`):
+- Deploy:
+  - `LOCAL_CCIP_ROUTER`
+  - `LOCAL_LINK_TOKEN`
+  - Optional: `LOCAL_CCIP_BNM_TOKEN`, `LOCAL_CCIP_LNM_TOKEN`, `AUTOMATED_DESTINATION_GAS_LIMIT`, `AUTOMATED_MAX_PRICE_AGE`, `AUTOMATED_PRICE_FEED`
+- Forwarder:
+  - `AUTOMATED_TRADER_CONTRACT`
+  - `AUTOMATION_FORWARDER_ADDRESS`
+- Receiver integration:
+  - `AUTOMATED_RECEIVER_CONTRACT`
+  - `AUTOMATED_TRADER_CONTRACT`
+  - Optional: `AUTOMATED_SOURCE_SELECTOR`, `AUTOMATED_ENABLE_MANUAL_ACTION_MODE`
+- Order creation:
+  - `AUTOMATED_TRADER_CONTRACT`
+  - `AUTOMATED_DESTINATION_SELECTOR`
+  - `AUTOMATED_RECEIVER_CONTRACT`
+  - `AUTOMATED_TOKEN_ADDRESS`
+  - `AUTOMATED_TOKEN_AMOUNT`
+  - `AUTOMATED_ACTION`
+  - `AUTOMATED_RECIPIENT`
+  - Timed: `AUTOMATED_INTERVAL_SECONDS`
+  - Price: `AUTOMATED_PRICE_FEED`, `AUTOMATED_PRICE_THRESHOLD`, `AUTOMATED_EXECUTE_ABOVE`
+  - Balance: `AUTOMATED_BALANCE_REQUIRED`
+  - Optional: `AUTOMATED_RECURRING`, `AUTOMATED_MAX_EXECUTIONS`, `AUTOMATED_DEADLINE`
+
+Storage scripts (`script/Deploystorage.s.sol`):
+- Deploy/config:
+  - `USER_RECORD_REGISTRY_CONTRACT`
+  - `SYSTEM_WRITER_ADDRESS`
+- Profile:
+  - `PROFILE_COMMITMENT_HASH`
+- Single append:
+  - `RECORD_USER`
+  - `RECORD_FEATURE_TYPE`
+  - `RECORD_CHAIN_SELECTOR`
+  - `RECORD_SOURCE_CONTRACT`
+  - `RECORD_COUNTERPARTY`
+  - `RECORD_MESSAGE_ID`
+  - `RECORD_ASSET_TOKEN`
+  - `RECORD_AMOUNT`
+  - `RECORD_ACTION_HASH`
+  - `RECORD_STATUS`
+  - `RECORD_METADATA_HASH`
+  - `RECORD_EXTERNAL_EVENT_KEY`
+- Batch append:
+  - `RECORD_BATCH_COUNT`
+  - indexed vars with suffix `_0..._N`
+
 ## 6. Deployment Flow (Per Chain)
 Deploy sender on each source network:
 ```bash
@@ -243,6 +297,32 @@ Token transfer workflow graph:
    - confirm success on `https://ccip.chain.link` for `messageId`
    - optionally run balance checks on destination wallet
 4. Mark workflow as complete after destination confirmation
+
+Automated trading workflow graph:
+1. Trigger on `UpkeepExecutionFinished` / `OrderExecuted` from `AutomatedTrader`
+2. Resolve `messageId` and correlate with destination `TransferReceived`
+3. Branch:
+   - `TransferProcessed` -> success
+   - `ActionRequested` -> CRE executes destination protocol action and updates workflow state
+   - `TransferFailed` -> retry/recovery policy
+
+Feature 5 storage ingestion workflow graph:
+1. Subscribe to Feature 1-4 events from source and destination chains.
+2. Normalize payloads into `UserRecordRegistry.RecordInput`.
+3. Compute deterministic `externalEventKey` for idempotent writes.
+4. Write with `appendRecord` or `appendRecordsBatch`.
+5. On duplicate key revert, mark ingestion as already-completed.
+6. Read user timeline from `getUserRecordIds` + `getRecord`.
+
+Feature 5 state model:
+- `CREATED`: order/message intent created
+- `SENT`: source-chain send executed
+- `RECEIVED`: destination receive observed
+- `PROCESSED`: destination processing completed
+- `PENDING_ACTION`: destination manual action required (`ActionRequested`)
+- `FAILED`: failed execution path
+- `RETRY`: retry lifecycle initiated
+- `RECOVERED`: manual/owner recovery flow completed
 
 ### Example CRE Workflow Pseudocode
 ```ts
