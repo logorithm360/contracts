@@ -14,4 +14,5 @@ idea.txt
 MESSAGES.MD
 FOUNDRY.MD
 .env
-/broadcast/**/run-[0-9]*.json
+broadcast/
+token-verification.txt

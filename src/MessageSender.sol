@@ -8,6 +8,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface ISecurityManagerFeature6 {
+    function validateAction(address user, uint8 feature, bytes32 actionKey, uint256 weight) external;
+}
+
 /// @title  MessagingSender
 /// @notice Production-grade CCIP sender contract.
 ///         Supports paying fees in LINK or native gas.
@@ -43,6 +47,7 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     event DestinationChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event ExtraArgsUpdated(bytes extraArgs);
     event FeeConfigUpdated(bool payInLink);
+    event SecurityConfigUpdated(address indexed securityManager, address indexed tokenVerifier);
     event LinkWithdrawn(address indexed to, uint256 amount);
     event NativeWithdrawn(address indexed to, uint256 amount);
 
@@ -64,6 +69,12 @@ contract MessagingSender is Ownable, ReentrancyGuard {
 
     /// @notice If true, fees are paid in LINK; otherwise in native gas.
     bool public payFeesInLink;
+
+    /// @notice Feature 6 optional security manager (can be configured post-deploy).
+    address public securityManager;
+
+    /// @notice Feature 6 optional token verifier (unused in messaging, reserved for unified config).
+    address public tokenVerifier;
 
     // ─────────────────────────────────────────────────────────────
     //  Constructor
@@ -117,6 +128,7 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (bytes(_text).length == 0) revert EmptyData();
+        _validateSecurity(msg.sender, _text);
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(I_LINK_TOKEN));
 
@@ -147,6 +159,7 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (bytes(_text).length == 0) revert EmptyData();
+        _validateSecurity(msg.sender, _text);
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(0));
 
@@ -217,6 +230,13 @@ contract MessagingSender is Ownable, ReentrancyGuard {
         emit FeeConfigUpdated(_payInLink);
     }
 
+    /// @notice Configures Feature 6 security dependencies. Set both zero-address to disable.
+    function configureSecurity(address _securityManager, address _tokenVerifier) external onlyOwner {
+        securityManager = _securityManager;
+        tokenVerifier = _tokenVerifier;
+        emit SecurityConfigUpdated(_securityManager, _tokenVerifier);
+    }
+
     /// @notice Emergency: withdraw any LINK stuck in this contract.
     function withdrawLink(address _to) external onlyOwner {
         if (_to == address(0)) revert ZeroAddress();
@@ -255,5 +275,17 @@ contract MessagingSender is Ownable, ReentrancyGuard {
             extraArgs: extraArgs, // mutable — never hardcoded
             feeToken: _feeToken // address(0) = native gas
         });
+    }
+
+    function _validateSecurity(address _user, string calldata _text) internal {
+        if (securityManager == address(0)) return;
+
+        ISecurityManagerFeature6(securityManager)
+            .validateAction(
+                _user,
+                0, // FeatureId.MESSAGE
+                keccak256(bytes(_text)),
+                1
+            );
     }
 }

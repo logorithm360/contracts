@@ -35,6 +35,8 @@ contract DeploySender is Script {
         address localLink = vm.envAddress("LOCAL_LINK_TOKEN");
         bool payInLink = vm.envOr("PAY_FEES_IN_LINK", true);
         uint256 destinationGasLimit = vm.envOr("DESTINATION_GAS_LIMIT", uint256(400_000));
+        address securityManager = vm.envOr("SECURITY_MANAGER_CONTRACT", address(0));
+        address tokenVerifier = vm.envOr("TOKEN_VERIFIER_CONTRACT", address(0));
 
         console.log("Deploying MessagingSender on", networkName);
         console.log("Chain ID:      ", block.chainid);
@@ -59,6 +61,10 @@ contract DeploySender is Script {
         );
         senderContract.updateExtraArgs(productionExtraArgs);
 
+        if (securityManager != address(0) || tokenVerifier != address(0)) {
+            senderContract.configureSecurity(securityManager, tokenVerifier);
+        }
+
         vm.stopBroadcast();
 
         require(senderContract.getRouter() == localRouter, "router mismatch");
@@ -68,6 +74,8 @@ contract DeploySender is Script {
         console.log("MessagingSender deployed at:", address(senderContract));
         console.log("Router:                    ", localRouter);
         console.log("LINK token:                ", localLink);
+        console.log("Security manager:          ", securityManager);
+        console.log("Token verifier:            ", tokenVerifier);
         console.log("=============================================");
         console.log("Allowlisted destination selectors:");
         for (uint256 i = 0; i < selectors.length; i++) {

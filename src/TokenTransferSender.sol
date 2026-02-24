@@ -8,6 +8,16 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface ITokenVerifierFeature6 {
+    function isTransferSafe(address token, uint256 amount) external returns (bool);
+}
+
+interface ISecurityManagerTransferFeature6 {
+    function validateTransfer(address user, uint8 feature, address token, uint256 amount) external;
+    function enforcementMode() external view returns (uint8);
+    function logIncident(address actor, uint8 feature, bytes32 reason, bytes32 ref) external;
+}
+
 /// @title TokenTransferSender
 /// @notice Sends ERC20 token transfers cross-chain via CCIP.
 /// @dev Deployed on source chain. Supports LINK fees or native fees.
@@ -23,6 +33,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
     error InsufficientLinkBalance(uint256 have, uint256 need);
     error InsufficientNativeBalance(uint256 sent, uint256 need);
     error RefundFailed();
+    error UnsafeToken(address token, uint256 amount);
 
     event TokensTransferred(
         bytes32 indexed messageId,
@@ -39,6 +50,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
     event TokenAllowlisted(address indexed token, bool allowed);
     event ExtraArgsUpdated(bytes extraArgs);
     event FeeConfigUpdated(bool payInLink);
+    event SecurityConfigUpdated(address indexed securityManager, address indexed tokenVerifier);
     event LinkWithdrawn(address indexed to, uint256 amount);
     event NativeWithdrawn(address indexed to, uint256 amount);
     event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
@@ -51,6 +63,8 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
 
     bytes public extraArgs;
     bool public payFeesInLink;
+    address public securityManager;
+    address public tokenVerifier;
 
     constructor(address _router, address _linkToken, bool _payFeesInLink) Ownable(msg.sender) {
         if (_router == address(0) || _linkToken == address(0)) revert ZeroAddress();
@@ -94,6 +108,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
+        _validateSecurity(msg.sender, _token, _amount);
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
@@ -144,6 +159,7 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
+        _validateSecurity(msg.sender, _token, _amount);
 
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
@@ -215,6 +231,13 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
         emit FeeConfigUpdated(_payInLink);
     }
 
+    /// @notice Configures Feature 6 security dependencies. Set both zero-address to disable.
+    function configureSecurity(address _securityManager, address _tokenVerifier) external onlyOwner {
+        securityManager = _securityManager;
+        tokenVerifier = _tokenVerifier;
+        emit SecurityConfigUpdated(_securityManager, _tokenVerifier);
+    }
+
     function withdrawLink(address _to) external onlyOwner {
         if (_to == address(0)) revert ZeroAddress();
         uint256 bal = I_LINK_TOKEN.balanceOf(address(this));
@@ -260,5 +283,35 @@ contract TokenTransferSender is Ownable, ReentrancyGuard {
             extraArgs: extraArgs,
             feeToken: _feeToken
         });
+    }
+
+    function _validateSecurity(address _user, address _token, uint256 _amount) internal {
+        if (securityManager != address(0)) {
+            ISecurityManagerTransferFeature6(securityManager)
+                .validateTransfer(
+                    _user,
+                    1, // FeatureId.TOKEN_TRANSFER
+                    _token,
+                    _amount
+                );
+        }
+
+        if (tokenVerifier == address(0)) return;
+
+        bool safe = ITokenVerifierFeature6(tokenVerifier).isTransferSafe(_token, _amount);
+        if (safe) return;
+
+        if (securityManager != address(0) && ISecurityManagerTransferFeature6(securityManager).enforcementMode() == 0) {
+            ISecurityManagerTransferFeature6(securityManager)
+                .logIncident(
+                    _user,
+                    1, // FeatureId.TOKEN_TRANSFER
+                    "TOKEN_UNSAFE",
+                    bytes32(uint256(uint160(_token)))
+                );
+            return;
+        }
+
+        revert UnsafeToken(_token, _amount);
     }
 }

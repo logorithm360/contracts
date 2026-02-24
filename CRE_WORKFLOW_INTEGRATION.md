@@ -362,7 +362,48 @@ async function onRetryCompleted(evt: { messageId: string; success: boolean }) {
 }
 ```
 
-## 9. Testing
+## 9. Feature 6 Security Integration (V1 + CRE V2 Path)
+Feature 6 V1 is on-chain and provides global gating contracts:
+- `src/SecurityManager.sol`
+- `src/TokenVerifier.sol`
+
+### V1 Runtime Model
+1. Feature sender contract calls `SecurityManager.validateAction` / `validateTransfer`.
+2. For token operations, sender also calls `TokenVerifier.isTransferSafe`.
+3. In `MONITOR` mode:
+   - operation continues
+   - policy violations are logged via incidents/events
+4. In `ENFORCE` mode:
+   - violating operations revert (fail-closed)
+
+### Sender Hooks Currently Wired
+- `MessagingSender`: action validation before send
+- `TokenTransferSender`: transfer validation + token verification before send
+- `ProgrammableTokenSender`: action + transfer validation + token verification before send
+
+### CRE Responsibilities for V1 Operations
+- Read `PolicyViolation` / `IncidentLogged` events from `SecurityManager`
+- Build dashboards/alerts for:
+  - rate-limit violations
+  - pause events
+  - amount-limit failures
+  - unsafe token usage attempts
+- Keep system in `MONITOR` until violation profile is stable
+- Trigger owner runbook action to switch to `ENFORCE`
+
+### token-verification-v2 (CRE JS/API, next phase)
+CRE adds async risk analysis that V1 intentionally does not execute:
+1. Observe candidate tokens and user actions from sender/security events.
+2. Call external risk APIs / threat intel / analytics in CRE JS.
+3. Compute verdict and policy recommendation off-chain.
+4. Write policy updates back on-chain through owner-approved tx:
+   - allowlist/blocklist updates
+   - transfer limit updates
+   - optional incident tagging metadata
+
+This keeps on-chain execution deterministic while allowing deeper, evolving verification logic in CRE.
+
+## 10. Testing
 Local:
 ```bash
 forge test --match-contract MessagingTest -vv
@@ -383,7 +424,7 @@ Token transfer fork suite:
 forge test --match-contract TokenTransferForkTest -vvv
 ```
 
-## 10. Notes
+## 11. Notes
 - `MessagingReceiver` sender trust is chain-aware: sender addresses are allowlisted per source chain.
 - This prevents false trust from same-address collisions across different chains.
 - Dependency warnings from vendored `lib/chainlink-local` code are expected and non-blocking.
