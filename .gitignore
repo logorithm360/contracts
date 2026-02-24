@@ -15,3 +15,4 @@ MESSAGES.MD
 FOUNDRY.MD
 .env
 /broadcast/**/run-[0-9]*.json
+token-verification.txt
