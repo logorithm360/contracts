@@ -24,6 +24,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     error OrderNotFound(uint256 orderId);
     error OrderAlreadyExecuted(uint256 orderId);
     error UnauthorizedCaller(address caller);
+    error UnauthorizedWorkflow(address caller);
     error DestinationChainNotAllowlisted(uint64 chainSelector);
     error TokenNotAllowlisted(address token);
     error PriceFeedNotAllowlisted(address priceFeed);
@@ -47,6 +48,18 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         EXECUTED,
         CANCELLED,
         PAUSED
+    }
+
+    enum DCAStatus {
+        PENDING_FIRST_EXECUTION,
+        SCHEDULED,
+        AWAITING_CONDITION,
+        PAUSED_BY_OWNER,
+        PAUSED_BY_WORKFLOW,
+        INSUFFICIENT_FUNDS,
+        COMPLETED,
+        EXPIRED,
+        CANCELLED
     }
 
     enum SkipReason {
@@ -89,6 +102,13 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         uint256 deadline;
         uint256 createdAt;
         address creator;
+        bool pausedByWorkflow;
+        bytes32[3] lastPendingMessageIds;
+        bytes32[3] lastCompletedMessageIds;
+        bytes32[3] lastFailedMessageIds;
+        uint8 pendingHead;
+        uint8 completedHead;
+        uint8 failedHead;
     }
 
     struct CommonOrderConfig {
@@ -109,6 +129,35 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         string action;
         bytes extraData;
         uint256 deadline;
+    }
+
+    struct OrderSnapshot {
+        uint256 orderId;
+        address owner;
+        TriggerType triggerType;
+        DCAStatus dcaStatus;
+        bool isReadyToExecute;
+        bool isFunded;
+        uint256 estimatedFeePerExecution;
+        uint256 executionsRemainingFunded;
+        address token;
+        uint256 amount;
+        uint64 destinationChain;
+        address recipient;
+        string action;
+        uint256 interval;
+        uint256 createdAt;
+        uint256 lastExecutedAt;
+        uint256 nextExecutionAt;
+        uint256 deadline;
+        uint256 executionCount;
+        uint256 maxExecutions;
+        bool recurring;
+        uint256 contractLinkBalance;
+        uint256 contractTokenBalance;
+        bytes32[3] lastPendingMessageIds;
+        bytes32[3] lastCompletedMessageIds;
+        bytes32[3] lastFailedMessageIds;
     }
 
     event OrderCreated(
@@ -132,17 +181,21 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     event OrderPaused(uint256 indexed orderId, bool paused);
 
     event ForwarderSet(address indexed forwarder);
+    event WorkflowAddressSet(address indexed workflow);
     event DestinationChainAllowlisted(uint64 indexed chainSelector, bool allowed);
     event TokenAllowlisted(address indexed token, bool allowed);
     event PriceFeedAllowlisted(address indexed feed, bool allowed);
     event TokenPriceFeedSet(address indexed token, address indexed feed);
     event MaxPriceAgeUpdated(uint256 maxPriceAge);
     event ExtraArgsUpdated(bytes extraArgs);
+    event ExecutionConfirmed(uint256 indexed orderId, bytes32 indexed messageId);
+    event ExecutionFailed(uint256 indexed orderId, bytes32 indexed messageId);
 
     IRouterClient private immutable I_ROUTER;
     IERC20 private immutable I_LINK_TOKEN;
 
     address public s_forwarderAddress;
+    address public s_workflowAddress;
 
     mapping(uint64 => bool) public allowlistedDestinationChains;
     mapping(address => bool) public allowlistedTokens;
@@ -150,6 +203,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     mapping(address => address) public tokenPriceFeeds;
 
     mapping(uint256 => TradeOrder) public orders;
+    mapping(address => uint256[]) private s_userOrders;
     uint256[] public activeOrderIds;
     uint256 public nextOrderId;
 
@@ -157,6 +211,13 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     uint256 public maxPriceAge;
 
     uint256 public constant MAX_ORDERS_PER_CHECK = 20;
+
+    modifier onlyWorkflow() {
+        if (msg.sender != s_workflowAddress && msg.sender != owner()) {
+            revert UnauthorizedWorkflow(msg.sender);
+        }
+        _;
+    }
 
     constructor(address _router, address _linkToken) Ownable(msg.sender) {
         if (_router == address(0) || _linkToken == address(0)) revert ZeroAddress();
@@ -264,6 +325,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         order.interval = _intervalSeconds;
 
         activeOrderIds.push(orderId);
+        s_userOrders[msg.sender].push(orderId);
 
         emit OrderCreated(
             orderId,
@@ -386,6 +448,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         order.executeAbove = _executeAbove;
 
         activeOrderIds.push(orderId);
+        s_userOrders[msg.sender].push(orderId);
 
         emit OrderCreated(
             orderId,
@@ -432,6 +495,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         order.balanceRequired = _balanceRequired;
 
         activeOrderIds.push(orderId);
+        s_userOrders[msg.sender].push(orderId);
 
         emit OrderCreated(
             orderId,
@@ -459,6 +523,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         if (order.createdAt == 0) revert OrderNotFound(_orderId);
 
         order.status = _paused ? OrderStatus.PAUSED : OrderStatus.ACTIVE;
+        order.pausedByWorkflow = false;
         emit OrderPaused(_orderId, _paused);
     }
 
@@ -495,9 +560,67 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         fee = I_ROUTER.getFee(order.destinationChain, message);
     }
 
+    function getUserOrders(address _user) external view returns (OrderSnapshot[] memory snapshots) {
+        uint256[] storage ids = s_userOrders[_user];
+        snapshots = new OrderSnapshot[](ids.length);
+        for (uint256 i = 0; i < ids.length; i++) {
+            snapshots[i] = _buildSnapshot(orders[ids[i]]);
+        }
+    }
+
+    function getOrderSnapshot(uint256 _orderId) external view returns (OrderSnapshot memory snapshot) {
+        TradeOrder storage order = orders[_orderId];
+        if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        return _buildSnapshot(order);
+    }
+
+    function getUserOrderIds(address _user) external view returns (uint256[] memory) {
+        return s_userOrders[_user];
+    }
+
+    function confirmExecution(uint256 _orderId, bytes32 _messageId) external onlyWorkflow {
+        TradeOrder storage order = orders[_orderId];
+        if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        _clearFromPending(order, _messageId);
+        order.lastCompletedMessageIds[order.completedHead] = _messageId;
+        order.completedHead = uint8((order.completedHead + 1) % 3);
+        emit ExecutionConfirmed(_orderId, _messageId);
+    }
+
+    function recordFailedExecution(uint256 _orderId, bytes32 _messageId) external onlyWorkflow {
+        TradeOrder storage order = orders[_orderId];
+        if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        _clearFromPending(order, _messageId);
+        order.lastFailedMessageIds[order.failedHead] = _messageId;
+        order.failedHead = uint8((order.failedHead + 1) % 3);
+        emit ExecutionFailed(_orderId, _messageId);
+    }
+
     function setForwarder(address _forwarder) external onlyOwner {
         s_forwarderAddress = _forwarder;
         emit ForwarderSet(_forwarder);
+    }
+
+    function setWorkflowAddress(address _workflow) external onlyOwner {
+        if (_workflow == address(0)) revert ZeroAddress();
+        s_workflowAddress = _workflow;
+        emit WorkflowAddressSet(_workflow);
+    }
+
+    function pauseOrderByWorkflow(uint256 _orderId) external onlyWorkflow {
+        TradeOrder storage order = orders[_orderId];
+        if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        order.status = OrderStatus.PAUSED;
+        order.pausedByWorkflow = true;
+        emit OrderPaused(_orderId, true);
+    }
+
+    function resumeOrderByWorkflow(uint256 _orderId) external onlyWorkflow {
+        TradeOrder storage order = orders[_orderId];
+        if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        order.status = OrderStatus.ACTIVE;
+        order.pausedByWorkflow = false;
+        emit OrderPaused(_orderId, false);
     }
 
     function allowlistDestinationChain(uint64 _chainSelector, bool _allowed) external onlyOwner {
@@ -660,6 +783,8 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         IERC20(order.token).forceApprove(address(I_ROUTER), order.amount);
 
         messageId = I_ROUTER.ccipSend(order.destinationChain, message);
+        order.lastPendingMessageIds[order.pendingHead] = messageId;
+        order.pendingHead = uint8((order.pendingHead + 1) % 3);
 
         order.lastExecutedAt = block.timestamp;
         order.executionCount++;
@@ -693,6 +818,79 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
             extraArgs: extraArgs,
             feeToken: address(I_LINK_TOKEN)
         });
+    }
+
+    function _buildSnapshot(TradeOrder storage order) internal view returns (OrderSnapshot memory snap) {
+        snap.orderId = order.orderId;
+        snap.owner = order.creator;
+        snap.triggerType = order.triggerType;
+        snap.token = order.token;
+        snap.amount = order.amount;
+        snap.destinationChain = order.destinationChain;
+        snap.recipient = order.recipient;
+        snap.action = order.action;
+        snap.interval = order.interval;
+        snap.createdAt = order.createdAt;
+        snap.lastExecutedAt = order.lastExecutedAt;
+        snap.deadline = order.deadline;
+        snap.executionCount = order.executionCount;
+        snap.maxExecutions = order.maxExecutions;
+        snap.recurring = order.recurring;
+
+        if (order.triggerType == TriggerType.TIME_BASED) {
+            if (order.executionCount == 0) {
+                snap.nextExecutionAt = order.createdAt;
+            } else {
+                snap.nextExecutionAt = order.lastExecutedAt + order.interval;
+            }
+        }
+
+        snap.contractLinkBalance = I_LINK_TOKEN.balanceOf(address(this));
+        snap.contractTokenBalance = IERC20(order.token).balanceOf(address(this));
+
+        if (order.createdAt > 0 && allowlistedDestinationChains[order.destinationChain]) {
+            uint256 resolvedDeadline = _resolveDeadline(order);
+            try I_ROUTER.getFee(order.destinationChain, _buildCCIPMessage(order, resolvedDeadline)) returns (
+                uint256 fee
+            ) {
+                snap.estimatedFeePerExecution = fee;
+                snap.isFunded = snap.contractLinkBalance >= fee && snap.contractTokenBalance >= order.amount;
+                snap.executionsRemainingFunded = fee > 0 ? snap.contractLinkBalance / fee : 0;
+            } catch {
+                snap.estimatedFeePerExecution = 0;
+                snap.executionsRemainingFunded = 0;
+                snap.isFunded = false;
+            }
+        }
+
+        (bool ready,) = _isOrderExecutable(order);
+        snap.isReadyToExecute = ready;
+        snap.dcaStatus = _computeDcaStatus(order, snap.isFunded);
+        snap.lastPendingMessageIds = order.lastPendingMessageIds;
+        snap.lastCompletedMessageIds = order.lastCompletedMessageIds;
+        snap.lastFailedMessageIds = order.lastFailedMessageIds;
+    }
+
+    function _computeDcaStatus(TradeOrder storage order, bool isFunded) internal view returns (DCAStatus) {
+        if (order.status == OrderStatus.CANCELLED) return DCAStatus.CANCELLED;
+        if (order.status == OrderStatus.EXECUTED) return DCAStatus.COMPLETED;
+        if (order.deadline > 0 && block.timestamp > order.deadline) return DCAStatus.EXPIRED;
+        if (order.status == OrderStatus.PAUSED) {
+            return order.pausedByWorkflow ? DCAStatus.PAUSED_BY_WORKFLOW : DCAStatus.PAUSED_BY_OWNER;
+        }
+        if (!isFunded) return DCAStatus.INSUFFICIENT_FUNDS;
+        if (order.executionCount == 0) return DCAStatus.PENDING_FIRST_EXECUTION;
+        if (order.triggerType == TriggerType.TIME_BASED) return DCAStatus.SCHEDULED;
+        return DCAStatus.AWAITING_CONDITION;
+    }
+
+    function _clearFromPending(TradeOrder storage order, bytes32 _messageId) internal {
+        for (uint8 i = 0; i < 3; i++) {
+            if (order.lastPendingMessageIds[i] == _messageId) {
+                order.lastPendingMessageIds[i] = bytes32(0);
+                return;
+            }
+        }
     }
 
     function _resolveDeadline(TradeOrder storage order) internal view returns (uint256) {
@@ -730,6 +928,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         order.deadline = config.deadline;
         order.createdAt = block.timestamp;
         order.creator = msg.sender;
+        order.pausedByWorkflow = false;
     }
 
     function _validateOrderInputs(

@@ -406,6 +406,64 @@ contract AutomatedTradingTest is Test {
         assertGt(fee, 0);
     }
 
+    function test_GetUserOrders_ReturnsSnapshotAndIds() public {
+        _createTimedOrder("transfer", true, 0, INTERVAL);
+
+        uint256[] memory ids = trader.getUserOrderIds(owner);
+        assertEq(ids.length, 1);
+        assertEq(ids[0], 0);
+
+        AutomatedTrader.OrderSnapshot[] memory snapshots = trader.getUserOrders(owner);
+        assertEq(snapshots.length, 1);
+        assertEq(snapshots[0].orderId, 0);
+        assertEq(snapshots[0].owner, owner);
+        assertEq(uint8(snapshots[0].dcaStatus), uint8(AutomatedTrader.DCAStatus.PENDING_FIRST_EXECUTION));
+    }
+
+    function test_WorkflowOnlyMethods_RevertForUnauthorized() public {
+        vm.prank(owner);
+        trader.setWorkflowAddress(makeAddr("workflow"));
+
+        vm.expectRevert(abi.encodeWithSelector(AutomatedTrader.UnauthorizedWorkflow.selector, attacker));
+        vm.prank(attacker);
+        trader.pauseOrderByWorkflow(0);
+    }
+
+    function test_ConfirmExecution_MovesMessageIdPendingToCompleted() public {
+        _createTimedOrder("transfer", true, 0, INTERVAL);
+        bytes32 messageId = _runUpkeepAndGetMessageId();
+
+        AutomatedTrader.OrderSnapshot memory beforeSnapshot = trader.getOrderSnapshot(0);
+        bool foundPendingBefore;
+        for (uint256 i = 0; i < 3; i++) {
+            if (beforeSnapshot.lastPendingMessageIds[i] == messageId) {
+                foundPendingBefore = true;
+            }
+        }
+        assertTrue(foundPendingBefore, "message should be pending before confirmation");
+
+        address workflow = makeAddr("workflow");
+        vm.prank(owner);
+        trader.setWorkflowAddress(workflow);
+
+        vm.prank(workflow);
+        trader.confirmExecution(0, messageId);
+
+        AutomatedTrader.OrderSnapshot memory afterSnapshot = trader.getOrderSnapshot(0);
+        bool foundPendingAfter;
+        bool foundCompletedAfter;
+        for (uint256 i = 0; i < 3; i++) {
+            if (afterSnapshot.lastPendingMessageIds[i] == messageId) {
+                foundPendingAfter = true;
+            }
+            if (afterSnapshot.lastCompletedMessageIds[i] == messageId) {
+                foundCompletedAfter = true;
+            }
+        }
+        assertFalse(foundPendingAfter, "pending slot should be cleared");
+        assertTrue(foundCompletedAfter, "completed slot should contain messageId");
+    }
+
     function _createTimedOrder(string memory action, bool recurring, uint256 maxExec, uint256 interval_) internal {
         vm.prank(owner);
         trader.createTimedOrder(
