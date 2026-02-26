@@ -205,6 +205,10 @@ contract ProgrammableTokenReceiver is CCIPReceiver, Ownable, ReentrancyGuard {
         return receivedTransfers[_messageId];
     }
 
+    function isProcessed(bytes32 _messageId) external view returns (bool) {
+        return receivedTransfers[_messageId].status == TransferStatus.Processed;
+    }
+
     function getLastReceivedTransfer() external view returns (ReceivedTransfer memory) {
         require(transferIds.length > 0, "No transfers received");
         return receivedTransfers[transferIds[transferIds.length - 1]];
