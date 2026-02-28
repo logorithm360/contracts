@@ -7,6 +7,23 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 import {AutomatedTrader} from "../src/AutomatedTrader.sol";
 import {ProgrammableTokenReceiver} from "../src/ProgrammableTokenReceiver.sol";
 
+abstract contract AutomationReceiverEnvHelper is Script {
+    function _loadAutomatedReceiverAddress() internal view returns (address receiverAddr) {
+        string memory raw = vm.envOr("AUTOMATED_RECEIVER_CONTRACT", string(""));
+        if (bytes(raw).length == 0) {
+            raw = vm.envOr("AUTOMATED_RECEIVER_ADDRESS", string(""));
+        }
+
+        require(bytes(raw).length != 0, "AUTOMATED_RECEIVER_CONTRACT not set");
+        require(
+            bytes(raw)[0] != 0x24,
+            "AUTOMATED_RECEIVER_CONTRACT is literal '$...'; set a concrete 0x address"
+        );
+
+        receiverAddr = vm.parseAddress(raw);
+    }
+}
+
 /// @notice Deploys AutomatedTrader on Ethereum Sepolia and preconfigures destination/token allowlists.
 contract DeployAutomatedTrader is Script {
     function run() external returns (AutomatedTrader traderContract) {
@@ -23,6 +40,8 @@ contract DeployAutomatedTrader is Script {
         uint256 destinationGasLimit = vm.envOr("AUTOMATED_DESTINATION_GAS_LIMIT", uint256(500_000));
         uint256 configuredMaxPriceAge = vm.envOr("AUTOMATED_MAX_PRICE_AGE", uint256(1 hours));
         address initialPriceFeed = vm.envOr("AUTOMATED_PRICE_FEED", address(0));
+        address chainRegistry = vm.envOr("CHAIN_REGISTRY_CONTRACT", address(0));
+        uint8 resolverMode = _resolverModeFromEnv();
 
         console.log("Deploying AutomatedTrader on", SupportedNetworks.nameByChainId(block.chainid));
         console.log("Router:", localRouter);
@@ -60,13 +79,29 @@ contract DeployAutomatedTrader is Script {
         );
         traderContract.updateExtraArgs(nextExtraArgs);
 
+        if (chainRegistry != address(0) || resolverMode != 0) {
+            require(chainRegistry != address(0), "CHAIN_REGISTRY_CONTRACT required when resolver mode is enabled");
+            traderContract.configureChainRegistry(chainRegistry, resolverMode);
+        }
+
         vm.stopBroadcast();
 
         console.log("=============================================");
         console.log("AutomatedTrader deployed at:", address(traderContract));
         console.log("Configured gas limit:", destinationGasLimit);
         console.log("Configured maxPriceAge:", configuredMaxPriceAge);
+        console.log("Chain registry:", chainRegistry);
+        console.log("Resolver mode:", resolverMode);
         console.log("=============================================");
+    }
+
+    function _resolverModeFromEnv() internal view returns (uint8 mode) {
+        string memory modeName = vm.envOr("CHAIN_RESOLVER_MODE", string("DISABLED"));
+        bytes32 m = keccak256(bytes(modeName));
+        if (m == keccak256("DISABLED")) return 0;
+        if (m == keccak256("MONITOR")) return 1;
+        if (m == keccak256("ENFORCE")) return 2;
+        revert("Invalid CHAIN_RESOLVER_MODE");
     }
 }
 
@@ -92,11 +127,11 @@ contract SetAutomatedForwarder is Script {
 }
 
 /// @notice Configures programmable receiver to trust and manual-handle automated sender instructions.
-contract ConfigureAutomatedSenderOnReceiver is Script {
+contract ConfigureAutomatedSenderOnReceiver is AutomationReceiverEnvHelper {
     function run() external {
         require(SupportedNetworks.isSupportedChainId(block.chainid), "Unsupported destination chain");
 
-        address receiverAddr = vm.envAddress("AUTOMATED_RECEIVER_CONTRACT");
+        address receiverAddr = _loadAutomatedReceiverAddress();
         address automatedSender = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
 
         uint64 sourceSelector =
@@ -123,7 +158,7 @@ contract ConfigureAutomatedSenderOnReceiver is Script {
 }
 
 /// @notice Creates TIME_BASED automated order.
-contract CreateTimedOrder is Script {
+contract CreateTimedOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
             block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
@@ -132,7 +167,7 @@ contract CreateTimedOrder is Script {
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
         uint64 destinationSelector = uint64(vm.envUint("AUTOMATED_DESTINATION_SELECTOR"));
-        address receiverAddr = vm.envAddress("AUTOMATED_RECEIVER_CONTRACT");
+        address receiverAddr = _loadAutomatedReceiverAddress();
         address tokenAddr = vm.envAddress("AUTOMATED_TOKEN_ADDRESS");
         uint256 amount = vm.envUint("AUTOMATED_TOKEN_AMOUNT");
         address recipient = vm.envAddress("AUTOMATED_RECIPIENT");
@@ -187,7 +222,7 @@ contract CreateTimedOrder is Script {
 }
 
 /// @notice Creates PRICE_THRESHOLD automated order.
-contract CreatePriceOrder is Script {
+contract CreatePriceOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
             block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
@@ -196,7 +231,7 @@ contract CreatePriceOrder is Script {
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
         uint64 destinationSelector = uint64(vm.envUint("AUTOMATED_DESTINATION_SELECTOR"));
-        address receiverAddr = vm.envAddress("AUTOMATED_RECEIVER_CONTRACT");
+        address receiverAddr = _loadAutomatedReceiverAddress();
         address tokenAddr = vm.envAddress("AUTOMATED_TOKEN_ADDRESS");
         uint256 amount = vm.envUint("AUTOMATED_TOKEN_AMOUNT");
         address recipient = vm.envAddress("AUTOMATED_RECIPIENT");
@@ -279,7 +314,7 @@ contract SetTokenPriceFeed is Script {
 }
 
 /// @notice Creates BALANCE_TRIGGER automated order.
-contract CreateBalanceOrder is Script {
+contract CreateBalanceOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
             block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
@@ -288,7 +323,7 @@ contract CreateBalanceOrder is Script {
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
         uint64 destinationSelector = uint64(vm.envUint("AUTOMATED_DESTINATION_SELECTOR"));
-        address receiverAddr = vm.envAddress("AUTOMATED_RECEIVER_CONTRACT");
+        address receiverAddr = _loadAutomatedReceiverAddress();
         address tokenAddr = vm.envAddress("AUTOMATED_TOKEN_ADDRESS");
         uint256 amount = vm.envUint("AUTOMATED_TOKEN_AMOUNT");
         address recipient = vm.envAddress("AUTOMATED_RECIPIENT");

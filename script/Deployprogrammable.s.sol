@@ -8,8 +8,21 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 import {ProgrammableTokenSender} from "../src/ProgrammableTokenSender.sol";
 import {ProgrammableTokenReceiver} from "../src/ProgrammableTokenReceiver.sol";
 
+abstract contract ProgrammableEnvHelper is Script {
+    function _loadRequiredAddress(string memory key, string memory fallbackKey) internal view returns (address addr) {
+        string memory raw = vm.envOr(key, string(""));
+        if (bytes(raw).length == 0 && bytes(fallbackKey).length != 0) {
+            raw = vm.envOr(fallbackKey, string(""));
+        }
+
+        require(bytes(raw).length != 0, string.concat(key, " not set"));
+        require(bytes(raw)[0] != 0x24, string.concat(key, " is literal '$...'; set a concrete 0x address"));
+        addr = vm.parseAddress(raw);
+    }
+}
+
 /// @notice Deploys and configures ProgrammableTokenSender on one of the 5 supported testnets.
-contract DeployProgrammableSender is Script {
+contract DeployProgrammableSender is ProgrammableEnvHelper {
     function run() public returns (ProgrammableTokenSender senderContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
@@ -19,12 +32,14 @@ contract DeployProgrammableSender is Script {
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
         string memory networkName = SupportedNetworks.nameByChainId(block.chainid);
 
-        address localRouter = vm.envAddress("LOCAL_CCIP_ROUTER");
-        address localLink = vm.envAddress("LOCAL_LINK_TOKEN");
+        address localRouter = _loadRequiredAddress("LOCAL_CCIP_ROUTER", "");
+        address localLink = _loadRequiredAddress("LOCAL_LINK_TOKEN", "");
         bool payInLink = vm.envOr("PAY_FEES_IN_LINK", true);
         uint256 destinationGasLimit = vm.envOr("PROGRAMMABLE_DESTINATION_GAS_LIMIT", uint256(500_000));
         address securityManager = vm.envOr("SECURITY_MANAGER_CONTRACT", address(0));
         address tokenVerifier = vm.envOr("TOKEN_VERIFIER_CONTRACT", address(0));
+        address chainRegistry = vm.envOr("CHAIN_REGISTRY_CONTRACT", address(0));
+        uint8 resolverMode = _resolverModeFromEnv();
 
         address localBnm = vm.envOr("LOCAL_CCIP_BNM_TOKEN", address(0));
         address localLnm = vm.envOr("LOCAL_CCIP_LNM_TOKEN", address(0));
@@ -58,6 +73,11 @@ contract DeployProgrammableSender is Script {
             senderContract.configureSecurity(securityManager, tokenVerifier);
         }
 
+        if (chainRegistry != address(0) || resolverMode != 0) {
+            require(chainRegistry != address(0), "CHAIN_REGISTRY_CONTRACT required when resolver mode is enabled");
+            senderContract.configureChainRegistry(chainRegistry, resolverMode);
+        }
+
         vm.stopBroadcast();
 
         require(senderContract.getRouter() == localRouter, "router mismatch");
@@ -70,12 +90,23 @@ contract DeployProgrammableSender is Script {
         console.log("Default programmable gasLimit:     ", destinationGasLimit);
         console.log("Security manager:                  ", securityManager);
         console.log("Token verifier:                    ", tokenVerifier);
+        console.log("Chain registry:                    ", chainRegistry);
+        console.log("Resolver mode:                     ", resolverMode);
         console.log("=============================================");
+    }
+
+    function _resolverModeFromEnv() internal view returns (uint8 mode) {
+        string memory modeName = vm.envOr("CHAIN_RESOLVER_MODE", string("DISABLED"));
+        bytes32 m = keccak256(bytes(modeName));
+        if (m == keccak256("DISABLED")) return 0;
+        if (m == keccak256("MONITOR")) return 1;
+        if (m == keccak256("ENFORCE")) return 2;
+        revert("Invalid CHAIN_RESOLVER_MODE");
     }
 }
 
 /// @notice Deploys and configures ProgrammableTokenReceiver on one of the 5 supported testnets.
-contract DeployProgrammableReceiver is Script {
+contract DeployProgrammableReceiver is ProgrammableEnvHelper {
     function run() public returns (ProgrammableTokenReceiver receiverContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
@@ -85,7 +116,7 @@ contract DeployProgrammableReceiver is Script {
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
         string memory networkName = SupportedNetworks.nameByChainId(block.chainid);
 
-        address localRouter = vm.envAddress("LOCAL_CCIP_ROUTER");
+        address localRouter = _loadRequiredAddress("LOCAL_CCIP_ROUTER", "");
 
         console.log("Deploying ProgrammableTokenReceiver on", networkName);
         console.log("Chain ID:      ", block.chainid);
@@ -138,7 +169,7 @@ contract DeployProgrammableReceiver is Script {
 }
 
 /// @notice Sends a programmable token transfer (tokens + payload) between supported networks.
-contract SendProgrammable is Script {
+contract SendProgrammable is ProgrammableEnvHelper {
     struct Params {
         address senderAddr;
         address receiverAddr;
@@ -213,12 +244,12 @@ contract SendProgrammable is Script {
     }
 
     function _loadParams() internal view returns (Params memory p) {
-        p.senderAddr = vm.envAddress("PROGRAMMABLE_SENDER_CONTRACT");
-        p.receiverAddr = vm.envAddress("PROGRAMMABLE_RECEIVER_CONTRACT");
+        p.senderAddr = _loadRequiredAddress("PROGRAMMABLE_SENDER_CONTRACT", "");
+        p.receiverAddr = _loadRequiredAddress("PROGRAMMABLE_RECEIVER_CONTRACT", "PROGRAMMABLE_RECEIVER_ADDRESS");
         p.destinationSelector = uint64(vm.envUint("PROGRAMMABLE_DESTINATION_CHAIN_SELECTOR"));
-        p.tokenAddr = vm.envAddress("PROGRAMMABLE_TOKEN_ADDRESS");
+        p.tokenAddr = _loadRequiredAddress("PROGRAMMABLE_TOKEN_ADDRESS", "");
         p.amount = vm.envUint("PROGRAMMABLE_TOKEN_AMOUNT");
-        p.payloadRecipient = vm.envAddress("PAYLOAD_RECIPIENT");
+        p.payloadRecipient = _loadRequiredAddress("PAYLOAD_RECIPIENT", "");
         p.action = vm.envString("PAYLOAD_ACTION");
 
         p.payNative = vm.envOr("PROGRAMMABLE_PAY_NATIVE", false);
@@ -236,11 +267,11 @@ contract SendProgrammable is Script {
 }
 
 /// @notice Verifies programmable token delivery on destination receiver contract.
-contract VerifyProgrammable is Script {
+contract VerifyProgrammable is ProgrammableEnvHelper {
     function run() public view {
         require(SupportedNetworks.isSupportedChainId(block.chainid), "Unsupported destination chain");
 
-        address receiverAddr = vm.envAddress("PROGRAMMABLE_RECEIVER_CONTRACT");
+        address receiverAddr = _loadRequiredAddress("PROGRAMMABLE_RECEIVER_CONTRACT", "PROGRAMMABLE_RECEIVER_ADDRESS");
         bytes32 messageId = vm.envBytes32("MESSAGE_ID");
 
         require(receiverAddr != address(0), "PROGRAMMABLE_RECEIVER_CONTRACT not set");

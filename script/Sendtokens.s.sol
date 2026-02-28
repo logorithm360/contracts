@@ -8,6 +8,19 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 import {TokenTransferSender} from "../src/TokenTransferSender.sol";
 import {TokenTransferReceiver} from "../src/TokenTransferReceiver.sol";
 
+abstract contract TokenScriptEnvHelper is Script {
+    function _loadRequiredAddress(string memory key, string memory fallbackKey) internal view returns (address addr) {
+        string memory raw = vm.envOr(key, string(""));
+        if (bytes(raw).length == 0 && bytes(fallbackKey).length != 0) {
+            raw = vm.envOr(fallbackKey, string(""));
+        }
+
+        require(bytes(raw).length != 0, string.concat(key, " not set"));
+        require(bytes(raw)[0] != 0x24, string.concat(key, " is literal '$...'; set a concrete 0x address"));
+        addr = vm.parseAddress(raw);
+    }
+}
+
 /// @notice Sends cross-chain token transfers between the 5 supported networks.
 ///
 /// Required env vars:
@@ -28,7 +41,7 @@ import {TokenTransferReceiver} from "../src/TokenTransferReceiver.sol";
 ///   TOKEN_SENDER_CONTRACT=0x... TOKEN_RECEIVER_ADDRESS=0x... TOKEN_DESTINATION_CHAIN_SELECTOR=16281711391670634445 \
 ///   TOKEN_ADDRESS=0x... TOKEN_AMOUNT=1000000000000000000 \
 ///   forge script script/Sendtokens.s.sol:SendTokens --rpc-url sepolia --account deployer --broadcast -vvvv
-contract SendTokens is Script {
+contract SendTokens is TokenScriptEnvHelper {
     struct Params {
         address senderAddr;
         address receiverAddr;
@@ -95,10 +108,10 @@ contract SendTokens is Script {
     }
 
     function _loadParams() internal view returns (Params memory p) {
-        p.senderAddr = vm.envAddress("TOKEN_SENDER_CONTRACT");
-        p.receiverAddr = vm.envAddress("TOKEN_RECEIVER_ADDRESS");
+        p.senderAddr = _loadRequiredAddress("TOKEN_SENDER_CONTRACT", "");
+        p.receiverAddr = _loadRequiredAddress("TOKEN_RECEIVER_ADDRESS", "TOKEN_RECEIVER_CONTRACT");
         p.destinationSelector = uint64(vm.envUint("TOKEN_DESTINATION_CHAIN_SELECTOR"));
-        p.tokenAddr = vm.envAddress("TOKEN_ADDRESS");
+        p.tokenAddr = _loadRequiredAddress("TOKEN_ADDRESS", "");
         p.amount = vm.envUint("TOKEN_AMOUNT");
 
         p.payNative = vm.envOr("TOKEN_PAY_NATIVE", false);
@@ -122,11 +135,11 @@ contract SendTokens is Script {
 /// Example:
 ///   TOKEN_RECEIVER_CONTRACT=0x... MESSAGE_ID=0x... \
 ///   forge script script/Sendtokens.s.sol:VerifyTokenDelivery --rpc-url amoy -vv
-contract VerifyTokenDelivery is Script {
+contract VerifyTokenDelivery is TokenScriptEnvHelper {
     function run() public view {
         require(SupportedNetworks.isSupportedChainId(block.chainid), "Unsupported destination chain");
 
-        address receiverAddr = vm.envAddress("TOKEN_RECEIVER_CONTRACT");
+        address receiverAddr = _loadRequiredAddress("TOKEN_RECEIVER_CONTRACT", "TOKEN_RECEIVER_ADDRESS");
         bytes32 messageId = vm.envBytes32("MESSAGE_ID");
 
         require(receiverAddr != address(0), "TOKEN_RECEIVER_CONTRACT not set");
