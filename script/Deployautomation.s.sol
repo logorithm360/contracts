@@ -15,10 +15,7 @@ abstract contract AutomationReceiverEnvHelper is Script {
         }
 
         require(bytes(raw).length != 0, "AUTOMATED_RECEIVER_CONTRACT not set");
-        require(
-            bytes(raw)[0] != 0x24,
-            "AUTOMATED_RECEIVER_CONTRACT is literal '$...'; set a concrete 0x address"
-        );
+        require(bytes(raw)[0] != 0x24, "AUTOMATED_RECEIVER_CONTRACT is literal '$...'; set a concrete 0x address");
 
         receiverAddr = vm.parseAddress(raw);
     }
