@@ -11,6 +11,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IChainRegistry} from "./interfaces/IChainRegistry.sol";
 
 /// @title AutomatedTrader
 /// @notice Owner-operated automated cross-chain token execution powered by Chainlink Automation and CCIP.
@@ -36,6 +37,8 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     error OrderConditionNotMet(uint256 orderId, uint8 reason);
     error InvalidMaxPriceAge();
     error InsufficientLinkBalance(uint256 have, uint256 need);
+    error InvalidResolverMode(uint8 mode);
+    error RegistryPolicyBlocked(bytes32 reason);
 
     enum TriggerType {
         TIME_BASED,
@@ -77,6 +80,12 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         PRICE_STALE,
         PRICE_NOT_MET,
         BALANCE_TOO_LOW
+    }
+
+    enum ResolverMode {
+        DISABLED,
+        MONITOR,
+        ENFORCE
     }
 
     struct TradeOrder {
@@ -190,9 +199,19 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     event ExtraArgsUpdated(bytes extraArgs);
     event ExecutionConfirmed(uint256 indexed orderId, bytes32 indexed messageId);
     event ExecutionFailed(uint256 indexed orderId, bytes32 indexed messageId);
+    event ChainRegistryConfigured(address indexed chainRegistry, ResolverMode mode);
+    event RegistryPolicyViolation(
+        bytes32 indexed reason,
+        uint64 indexed sourceSelector,
+        uint64 indexed destinationSelector,
+        address token,
+        address counterparty
+    );
 
     IRouterClient private immutable I_ROUTER;
     IERC20 private immutable I_LINK_TOKEN;
+    IChainRegistry public chainRegistry;
+    ResolverMode public resolverMode;
 
     address public s_forwarderAddress;
     address public s_workflowAddress;
@@ -211,6 +230,14 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     uint256 public maxPriceAge;
 
     uint256 public constant MAX_ORDERS_PER_CHECK = 20;
+    bytes32 private constant SERVICE_KEY_AUTOMATED_TRADER = keccak256("AUTOMATED_TRADER");
+    bytes32 private constant SERVICE_KEY_PROGRAMMABLE_RECEIVER = keccak256("PROGRAMMABLE_TRANSFER_RECEIVER");
+    bytes32 private constant REASON_SOURCE_CHAIN_UNSUPPORTED = keccak256("SOURCE_CHAIN_UNSUPPORTED");
+    bytes32 private constant REASON_DESTINATION_CHAIN_UNSUPPORTED = keccak256("DESTINATION_CHAIN_UNSUPPORTED");
+    bytes32 private constant REASON_LANE_DISABLED = keccak256("LANE_DISABLED");
+    bytes32 private constant REASON_TOKEN_NOT_TRANSFERABLE = keccak256("TOKEN_NOT_TRANSFERABLE");
+    bytes32 private constant REASON_SOURCE_SERVICE_NOT_BOUND = keccak256("SOURCE_SERVICE_NOT_BOUND");
+    bytes32 private constant REASON_DESTINATION_SERVICE_NOT_BOUND = keccak256("DESTINATION_SERVICE_NOT_BOUND");
 
     modifier onlyWorkflow() {
         if (msg.sender != s_workflowAddress && msg.sender != owner()) {
@@ -664,6 +691,17 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         emit ExtraArgsUpdated(_extraArgs);
     }
 
+    /// @notice Configures Feature 7 chain registry and validation mode.
+    function configureChainRegistry(address _chainRegistry, uint8 _mode) external onlyOwner {
+        if (_mode > uint8(ResolverMode.ENFORCE)) revert InvalidResolverMode(_mode);
+        if (_mode != uint8(ResolverMode.DISABLED) && _chainRegistry == address(0)) revert ZeroAddress();
+
+        chainRegistry = IChainRegistry(_chainRegistry);
+        resolverMode = ResolverMode(_mode);
+
+        emit ChainRegistryConfigured(_chainRegistry, ResolverMode(_mode));
+    }
+
     function withdrawLink(address _to) external onlyOwner {
         if (_to == address(0)) revert ZeroAddress();
         uint256 bal = I_LINK_TOKEN.balanceOf(address(this));
@@ -766,6 +804,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
     function _executeOrder(uint256 _orderId) internal returns (bytes32 messageId) {
         TradeOrder storage order = orders[_orderId];
         if (order.createdAt == 0) revert OrderNotFound(_orderId);
+        _validateChainRegistry(order.destinationChain, order.receiverContract, order.token);
 
         (bool executable, SkipReason reason) = _isOrderExecutable(order);
         if (!executable) {
@@ -938,7 +977,7 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         address _receiverContract,
         address _recipient,
         string calldata _action
-    ) internal view {
+    ) internal {
         if (_token == address(0) || _receiverContract == address(0) || _recipient == address(0)) {
             revert ZeroAddress();
         }
@@ -948,6 +987,69 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
             revert DestinationChainNotAllowlisted(_destinationChain);
         }
         if (!allowlistedTokens[_token]) revert TokenNotAllowlisted(_token);
+        _validateChainRegistry(_destinationChain, _receiverContract, _token);
+    }
+
+    function _validateChainRegistry(uint64 _destinationChainSelector, address _receiver, address _token) internal {
+        if (resolverMode == ResolverMode.DISABLED) return;
+        if (address(chainRegistry) == address(0)) {
+            _handleRegistryViolation(REASON_SOURCE_CHAIN_UNSUPPORTED, 0, _destinationChainSelector, _token, _receiver);
+            return;
+        }
+
+        uint64 sourceSelector = chainRegistry.getSelectorByChainId(block.chainid);
+        if (sourceSelector == 0 || !chainRegistry.isChainSupported(sourceSelector)) {
+            _handleRegistryViolation(
+                REASON_SOURCE_CHAIN_UNSUPPORTED, sourceSelector, _destinationChainSelector, _token, _receiver
+            );
+            return;
+        }
+
+        if (!chainRegistry.isChainSupported(_destinationChainSelector)) {
+            _handleRegistryViolation(
+                REASON_DESTINATION_CHAIN_UNSUPPORTED, sourceSelector, _destinationChainSelector, _token, _receiver
+            );
+            return;
+        }
+
+        if (!chainRegistry.isLaneActive(sourceSelector, _destinationChainSelector)) {
+            _handleRegistryViolation(REASON_LANE_DISABLED, sourceSelector, _destinationChainSelector, _token, _receiver);
+            return;
+        }
+
+        if (!chainRegistry.isTokenTransferable(sourceSelector, _destinationChainSelector, _token)) {
+            _handleRegistryViolation(
+                REASON_TOKEN_NOT_TRANSFERABLE, sourceSelector, _destinationChainSelector, _token, _receiver
+            );
+            return;
+        }
+
+        address configuredSource = chainRegistry.getServiceContract(sourceSelector, SERVICE_KEY_AUTOMATED_TRADER);
+        if (configuredSource != address(this)) {
+            _handleRegistryViolation(
+                REASON_SOURCE_SERVICE_NOT_BOUND, sourceSelector, _destinationChainSelector, _token, _receiver
+            );
+            return;
+        }
+
+        address configuredDestination =
+            chainRegistry.getServiceContract(_destinationChainSelector, SERVICE_KEY_PROGRAMMABLE_RECEIVER);
+        if (configuredDestination != _receiver) {
+            _handleRegistryViolation(
+                REASON_DESTINATION_SERVICE_NOT_BOUND, sourceSelector, _destinationChainSelector, _token, _receiver
+            );
+        }
+    }
+
+    function _handleRegistryViolation(
+        bytes32 _reason,
+        uint64 _sourceSelector,
+        uint64 _destinationSelector,
+        address _token,
+        address _counterparty
+    ) internal {
+        emit RegistryPolicyViolation(_reason, _sourceSelector, _destinationSelector, _token, _counterparty);
+        if (resolverMode == ResolverMode.ENFORCE) revert RegistryPolicyBlocked(_reason);
     }
 
     function _scalePriceTo1e18(uint256 value, uint8 decimals) internal pure returns (uint256) {

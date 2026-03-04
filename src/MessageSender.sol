@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IChainRegistry} from "./interfaces/IChainRegistry.sol";
 
 interface ISecurityManagerFeature6 {
     function validateAction(address user, uint8 feature, bytes32 actionKey, uint256 weight) external;
@@ -32,6 +33,8 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     error InsufficientLinkBalance(uint256 have, uint256 need);
     error InsufficientNativeBalance(uint256 sent, uint256 need);
     error RefundFailed();
+    error InvalidResolverMode(uint8 mode);
+    error RegistryPolicyBlocked(bytes32 reason);
 
     // ─────────────────────────────────────────────────────────────
     //  Events
@@ -48,12 +51,30 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     event ExtraArgsUpdated(bytes extraArgs);
     event FeeConfigUpdated(bool payInLink);
     event SecurityConfigUpdated(address indexed securityManager, address indexed tokenVerifier);
+    event ChainRegistryConfigured(address indexed chainRegistry, ResolverMode mode);
+    event RegistryPolicyViolation(
+        bytes32 indexed reason, uint64 indexed sourceSelector, uint64 indexed destinationSelector, address counterparty
+    );
     event LinkWithdrawn(address indexed to, uint256 amount);
     event NativeWithdrawn(address indexed to, uint256 amount);
 
     // ─────────────────────────────────────────────────────────────
     //  State
     // ─────────────────────────────────────────────────────────────
+
+    enum ResolverMode {
+        DISABLED,
+        MONITOR,
+        ENFORCE
+    }
+
+    bytes32 private constant SERVICE_KEY_MESSAGE_SENDER = keccak256("MESSAGE_SENDER");
+    bytes32 private constant SERVICE_KEY_MESSAGE_RECEIVER = keccak256("MESSAGE_RECEIVER");
+    bytes32 private constant REASON_SOURCE_CHAIN_UNSUPPORTED = keccak256("SOURCE_CHAIN_UNSUPPORTED");
+    bytes32 private constant REASON_DESTINATION_CHAIN_UNSUPPORTED = keccak256("DESTINATION_CHAIN_UNSUPPORTED");
+    bytes32 private constant REASON_LANE_DISABLED = keccak256("LANE_DISABLED");
+    bytes32 private constant REASON_SOURCE_SERVICE_NOT_BOUND = keccak256("SOURCE_SERVICE_NOT_BOUND");
+    bytes32 private constant REASON_DESTINATION_SERVICE_NOT_BOUND = keccak256("DESTINATION_SERVICE_NOT_BOUND");
 
     /// @notice Immutable CCIP router on this chain.
     IRouterClient private immutable I_ROUTER;
@@ -75,6 +96,12 @@ contract MessagingSender is Ownable, ReentrancyGuard {
 
     /// @notice Feature 6 optional token verifier (unused in messaging, reserved for unified config).
     address public tokenVerifier;
+
+    /// @notice Feature 7 chain registry contract.
+    IChainRegistry public chainRegistry;
+
+    /// @notice Feature 7 resolver mode.
+    ResolverMode public resolverMode;
 
     // ─────────────────────────────────────────────────────────────
     //  Constructor
@@ -128,6 +155,7 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (bytes(_text).length == 0) revert EmptyData();
+        _validateChainRegistry(_destinationChainSelector, _receiver);
         _validateSecurity(msg.sender, _text);
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(I_LINK_TOKEN));
@@ -159,6 +187,7 @@ contract MessagingSender is Ownable, ReentrancyGuard {
     {
         if (_receiver == address(0)) revert ZeroAddress();
         if (bytes(_text).length == 0) revert EmptyData();
+        _validateChainRegistry(_destinationChainSelector, _receiver);
         _validateSecurity(msg.sender, _text);
 
         Client.EVM2AnyMessage memory message = _buildMessage(_receiver, _text, address(0));
@@ -237,6 +266,17 @@ contract MessagingSender is Ownable, ReentrancyGuard {
         emit SecurityConfigUpdated(_securityManager, _tokenVerifier);
     }
 
+    /// @notice Configures Feature 7 chain registry and validation mode.
+    function configureChainRegistry(address _chainRegistry, uint8 _mode) external onlyOwner {
+        if (_mode > uint8(ResolverMode.ENFORCE)) revert InvalidResolverMode(_mode);
+        if (_mode != uint8(ResolverMode.DISABLED) && _chainRegistry == address(0)) revert ZeroAddress();
+
+        chainRegistry = IChainRegistry(_chainRegistry);
+        resolverMode = ResolverMode(_mode);
+
+        emit ChainRegistryConfigured(_chainRegistry, ResolverMode(_mode));
+    }
+
     /// @notice Emergency: withdraw any LINK stuck in this contract.
     function withdrawLink(address _to) external onlyOwner {
         if (_to == address(0)) revert ZeroAddress();
@@ -287,5 +327,59 @@ contract MessagingSender is Ownable, ReentrancyGuard {
                 keccak256(bytes(_text)),
                 1
             );
+    }
+
+    function _validateChainRegistry(uint64 _destinationChainSelector, address _receiver) internal {
+        if (resolverMode == ResolverMode.DISABLED) return;
+        if (address(chainRegistry) == address(0)) {
+            _handleRegistryViolation(REASON_SOURCE_CHAIN_UNSUPPORTED, 0, _destinationChainSelector, _receiver);
+            return;
+        }
+
+        uint64 sourceSelector = chainRegistry.getSelectorByChainId(block.chainid);
+        if (sourceSelector == 0 || !chainRegistry.isChainSupported(sourceSelector)) {
+            _handleRegistryViolation(
+                REASON_SOURCE_CHAIN_UNSUPPORTED, sourceSelector, _destinationChainSelector, _receiver
+            );
+            return;
+        }
+
+        if (!chainRegistry.isChainSupported(_destinationChainSelector)) {
+            _handleRegistryViolation(
+                REASON_DESTINATION_CHAIN_UNSUPPORTED, sourceSelector, _destinationChainSelector, _receiver
+            );
+            return;
+        }
+
+        if (!chainRegistry.isLaneActive(sourceSelector, _destinationChainSelector)) {
+            _handleRegistryViolation(REASON_LANE_DISABLED, sourceSelector, _destinationChainSelector, _receiver);
+            return;
+        }
+
+        address configuredSource = chainRegistry.getServiceContract(sourceSelector, SERVICE_KEY_MESSAGE_SENDER);
+        if (configuredSource != address(this)) {
+            _handleRegistryViolation(
+                REASON_SOURCE_SERVICE_NOT_BOUND, sourceSelector, _destinationChainSelector, _receiver
+            );
+            return;
+        }
+
+        address configuredDestination =
+            chainRegistry.getServiceContract(_destinationChainSelector, SERVICE_KEY_MESSAGE_RECEIVER);
+        if (configuredDestination != _receiver) {
+            _handleRegistryViolation(
+                REASON_DESTINATION_SERVICE_NOT_BOUND, sourceSelector, _destinationChainSelector, _receiver
+            );
+        }
+    }
+
+    function _handleRegistryViolation(
+        bytes32 _reason,
+        uint64 _sourceSelector,
+        uint64 _destinationSelector,
+        address _counterparty
+    ) internal {
+        emit RegistryPolicyViolation(_reason, _sourceSelector, _destinationSelector, _counterparty);
+        if (resolverMode == ResolverMode.ENFORCE) revert RegistryPolicyBlocked(_reason);
     }
 }

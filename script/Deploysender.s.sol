@@ -37,6 +37,8 @@ contract DeploySender is Script {
         uint256 destinationGasLimit = vm.envOr("DESTINATION_GAS_LIMIT", uint256(400_000));
         address securityManager = vm.envOr("SECURITY_MANAGER_CONTRACT", address(0));
         address tokenVerifier = vm.envOr("TOKEN_VERIFIER_CONTRACT", address(0));
+        address chainRegistry = vm.envOr("CHAIN_REGISTRY_CONTRACT", address(0));
+        uint8 resolverMode = _resolverModeFromEnv();
 
         console.log("Deploying MessagingSender on", networkName);
         console.log("Chain ID:      ", block.chainid);
@@ -65,6 +67,11 @@ contract DeploySender is Script {
             senderContract.configureSecurity(securityManager, tokenVerifier);
         }
 
+        if (chainRegistry != address(0) || resolverMode != 0) {
+            require(chainRegistry != address(0), "CHAIN_REGISTRY_CONTRACT required when resolver mode is enabled");
+            senderContract.configureChainRegistry(chainRegistry, resolverMode);
+        }
+
         vm.stopBroadcast();
 
         require(senderContract.getRouter() == localRouter, "router mismatch");
@@ -76,6 +83,8 @@ contract DeploySender is Script {
         console.log("LINK token:                ", localLink);
         console.log("Security manager:          ", securityManager);
         console.log("Token verifier:            ", tokenVerifier);
+        console.log("Chain registry:            ", chainRegistry);
+        console.log("Resolver mode:             ", resolverMode);
         console.log("=============================================");
         console.log("Allowlisted destination selectors:");
         for (uint256 i = 0; i < selectors.length; i++) {
@@ -83,5 +92,14 @@ contract DeploySender is Script {
                 console.log("- ", selectors[i]);
             }
         }
+    }
+
+    function _resolverModeFromEnv() internal view returns (uint8 mode) {
+        string memory modeName = vm.envOr("CHAIN_RESOLVER_MODE", string("DISABLED"));
+        bytes32 m = keccak256(bytes(modeName));
+        if (m == keccak256("DISABLED")) return 0;
+        if (m == keccak256("MONITOR")) return 1;
+        if (m == keccak256("ENFORCE")) return 2;
+        revert("Invalid CHAIN_RESOLVER_MODE");
     }
 }

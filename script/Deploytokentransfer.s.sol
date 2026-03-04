@@ -39,6 +39,8 @@ contract DeployTokenSender is Script {
         uint256 destinationGasLimit = vm.envOr("TOKEN_TRANSFER_DESTINATION_GAS_LIMIT", uint256(0));
         address securityManager = vm.envOr("SECURITY_MANAGER_CONTRACT", address(0));
         address tokenVerifier = vm.envOr("TOKEN_VERIFIER_CONTRACT", address(0));
+        address chainRegistry = vm.envOr("CHAIN_REGISTRY_CONTRACT", address(0));
+        uint8 resolverMode = _resolverModeFromEnv();
 
         address localBnm = vm.envOr("LOCAL_CCIP_BNM_TOKEN", address(0));
         address localLnm = vm.envOr("LOCAL_CCIP_LNM_TOKEN", address(0));
@@ -80,6 +82,11 @@ contract DeployTokenSender is Script {
             senderContract.configureSecurity(securityManager, tokenVerifier);
         }
 
+        if (chainRegistry != address(0) || resolverMode != 0) {
+            require(chainRegistry != address(0), "CHAIN_REGISTRY_CONTRACT required when resolver mode is enabled");
+            senderContract.configureChainRegistry(chainRegistry, resolverMode);
+        }
+
         vm.stopBroadcast();
 
         require(senderContract.getRouter() == localRouter, "router mismatch");
@@ -92,6 +99,8 @@ contract DeployTokenSender is Script {
         console.log("Default token-transfer gasLimit:", destinationGasLimit);
         console.log("Security manager:               ", securityManager);
         console.log("Token verifier:                 ", tokenVerifier);
+        console.log("Chain registry:                 ", chainRegistry);
+        console.log("Resolver mode:                  ", resolverMode);
         console.log("=============================================");
         console.log("Allowlisted destination selectors:");
         for (uint256 i = 0; i < selectors.length; i++) {
@@ -103,6 +112,15 @@ contract DeployTokenSender is Script {
         console.log("- LINK", localLink);
         if (localBnm != address(0)) console.log("- CCIP-BnM", localBnm);
         if (localLnm != address(0)) console.log("- CCIP-LnM", localLnm);
+    }
+
+    function _resolverModeFromEnv() internal view returns (uint8 mode) {
+        string memory modeName = vm.envOr("CHAIN_RESOLVER_MODE", string("DISABLED"));
+        bytes32 m = keccak256(bytes(modeName));
+        if (m == keccak256("DISABLED")) return 0;
+        if (m == keccak256("MONITOR")) return 1;
+        if (m == keccak256("ENFORCE")) return 2;
+        revert("Invalid CHAIN_RESOLVER_MODE");
     }
 }
 
