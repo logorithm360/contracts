@@ -22,50 +22,62 @@ contract DeployChainRegistry is Script {
 
 contract SeedDefaultChainsAndLanes is Script {
     function run() external {
+        require(
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
+        );
+
         address registryAddr = vm.envAddress("CHAIN_REGISTRY_CONTRACT");
         ChainRegistry registry = ChainRegistry(registryAddr);
         uint8 feeTokenMode = uint8(vm.envOr("CHAIN_DEFAULT_FEE_TOKEN_MODE", uint256(3)));
+        bool isMainnet = SupportedNetworks.isMainnetChainId(block.chainid);
+        bool isTestnet = !isMainnet;
 
         vm.startBroadcast();
 
         bool[5] memory configured;
         configured[0] = _tryUpsertChain(
             registry,
-            SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR,
-            "Ethereum Sepolia",
-            "SEPOLIA"
+            isMainnet ? SupportedNetworks.ETHEREUM_MAINNET_CHAIN_ID : SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
+            isMainnet ? SupportedNetworks.ETHEREUM_MAINNET_SELECTOR : SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR,
+            isMainnet ? "Ethereum Mainnet" : "Ethereum Sepolia",
+            isMainnet ? "ETHEREUM" : "SEPOLIA",
+            isTestnet
         );
         configured[1] = _tryUpsertChain(
             registry,
-            SupportedNetworks.POLYGON_AMOY_CHAIN_ID,
-            SupportedNetworks.POLYGON_AMOY_SELECTOR,
-            "Polygon Amoy",
-            "AMOY"
+            isMainnet ? SupportedNetworks.POLYGON_MAINNET_CHAIN_ID : SupportedNetworks.POLYGON_AMOY_CHAIN_ID,
+            isMainnet ? SupportedNetworks.POLYGON_MAINNET_SELECTOR : SupportedNetworks.POLYGON_AMOY_SELECTOR,
+            isMainnet ? "Polygon Mainnet" : "Polygon Amoy",
+            isMainnet ? "POLYGON" : "AMOY",
+            isTestnet
         );
         configured[2] = _tryUpsertChain(
             registry,
-            SupportedNetworks.ARBITRUM_SEPOLIA_CHAIN_ID,
-            SupportedNetworks.ARBITRUM_SEPOLIA_SELECTOR,
-            "Arbitrum Sepolia",
-            "ARBITRUM_SEPOLIA"
+            isMainnet ? SupportedNetworks.ARBITRUM_MAINNET_CHAIN_ID : SupportedNetworks.ARBITRUM_SEPOLIA_CHAIN_ID,
+            isMainnet ? SupportedNetworks.ARBITRUM_MAINNET_SELECTOR : SupportedNetworks.ARBITRUM_SEPOLIA_SELECTOR,
+            isMainnet ? "Arbitrum One" : "Arbitrum Sepolia",
+            isMainnet ? "ARBITRUM" : "ARBITRUM_SEPOLIA",
+            isTestnet
         );
         configured[3] = _tryUpsertChain(
             registry,
-            SupportedNetworks.BASE_SEPOLIA_CHAIN_ID,
-            SupportedNetworks.BASE_SEPOLIA_SELECTOR,
-            "Base Sepolia",
-            "BASE_SEPOLIA"
+            isMainnet ? SupportedNetworks.BASE_MAINNET_CHAIN_ID : SupportedNetworks.BASE_SEPOLIA_CHAIN_ID,
+            isMainnet ? SupportedNetworks.BASE_MAINNET_SELECTOR : SupportedNetworks.BASE_SEPOLIA_SELECTOR,
+            isMainnet ? "Base Mainnet" : "Base Sepolia",
+            isMainnet ? "BASE" : "BASE_SEPOLIA",
+            isTestnet
         );
         configured[4] = _tryUpsertChain(
             registry,
-            SupportedNetworks.OP_SEPOLIA_CHAIN_ID,
-            SupportedNetworks.OP_SEPOLIA_SELECTOR,
-            "OP Sepolia",
-            "OP_SEPOLIA"
+            isMainnet ? SupportedNetworks.OP_MAINNET_CHAIN_ID : SupportedNetworks.OP_SEPOLIA_CHAIN_ID,
+            isMainnet ? SupportedNetworks.OP_MAINNET_SELECTOR : SupportedNetworks.OP_SEPOLIA_SELECTOR,
+            isMainnet ? "OP Mainnet" : "OP Sepolia",
+            isMainnet ? "OP" : "OP_SEPOLIA",
+            isTestnet
         );
 
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (!configured[i]) continue;
             for (uint256 j = 0; j < selectors.length; j++) {
@@ -84,7 +96,8 @@ contract SeedDefaultChainsAndLanes is Script {
         uint256 chainId,
         uint64 selector,
         string memory displayName,
-        string memory aliasKey
+        string memory aliasKey,
+        bool isTestnet
     ) internal returns (bool configured) {
         address router = vm.envOr(string.concat("CHAIN_", aliasKey, "_ROUTER"), address(0));
         address linkToken = vm.envOr(string.concat("CHAIN_", aliasKey, "_LINK_TOKEN"), address(0));
@@ -104,7 +117,7 @@ contract SeedDefaultChainsAndLanes is Script {
             linkToken: linkToken,
             wrappedNative: wrappedNative,
             isActive: active,
-            isTestnet: true
+            isTestnet: isTestnet
         });
 
         registry.upsertChain(record);

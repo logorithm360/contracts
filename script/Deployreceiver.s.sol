@@ -5,7 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {MessagingReceiver} from "../src/MessageReceiver.sol";
 import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 
-/// @notice Deploys and configures MessagingReceiver on one of the 5 supported testnets.
+/// @notice Deploys and configures MessagingReceiver on a supported Chainlink CCIP network.
 ///
 /// Prerequisites:
 ///   1. Set LOCAL_CCIP_ROUTER in your .env for the target chain
@@ -27,7 +27,7 @@ contract DeployReceiver is Script {
     function run() public returns (MessagingReceiver receiverContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -43,7 +43,7 @@ contract DeployReceiver is Script {
         receiverContract = new MessagingReceiver(localRouter);
 
         // Allowlist all supported source chains except this chain.
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 receiverContract.allowlistSourceChain(selectors[i], true);
@@ -81,6 +81,21 @@ contract DeployReceiver is Script {
     }
 
     function _senderBySelector(uint64 selector) internal view returns (address) {
+        if (selector == SupportedNetworks.ETHEREUM_MAINNET_SELECTOR) {
+            return vm.envOr("ETHEREUM_MAINNET_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.POLYGON_MAINNET_SELECTOR) {
+            return vm.envOr("POLYGON_MAINNET_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.ARBITRUM_MAINNET_SELECTOR) {
+            return vm.envOr("ARBITRUM_MAINNET_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.BASE_MAINNET_SELECTOR) {
+            return vm.envOr("BASE_MAINNET_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.OP_MAINNET_SELECTOR) {
+            return vm.envOr("OP_MAINNET_SENDER_CONTRACT", address(0));
+        }
         if (selector == SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR) {
             return vm.envOr("SEPOLIA_SENDER_CONTRACT", address(0));
         }

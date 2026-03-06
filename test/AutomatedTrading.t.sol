@@ -131,7 +131,7 @@ contract AutomatedTradingTest is Test {
     function test_CreateTimedOrder_AndImmediateCheckUpkeep() public {
         _createTimedOrder("transfer", true, 0, INTERVAL);
 
-        (bool needed,) = trader.checkUpkeep("");
+        (bool needed,) = _checkUpkeep();
         assertTrue(needed, "new timed order should be executable immediately");
     }
 
@@ -141,12 +141,12 @@ contract AutomatedTradingTest is Test {
         bytes32 messageId = _runUpkeepAndGetMessageId();
         assertNotEq(messageId, bytes32(0));
 
-        (bool neededNow,) = trader.checkUpkeep("");
+        (bool neededNow,) = _checkUpkeep();
         assertFalse(neededNow, "should not execute again before interval");
 
         skip(INTERVAL + 1);
 
-        (bool neededLater,) = trader.checkUpkeep("");
+        (bool neededLater,) = _checkUpkeep();
         assertTrue(neededLater, "should execute again after interval");
     }
 
@@ -168,7 +168,7 @@ contract AutomatedTradingTest is Test {
         );
         vm.stopPrank();
 
-        (bool needed,) = trader.checkUpkeep("");
+        (bool needed,) = _checkUpkeep();
         assertTrue(needed, "price >= threshold should trigger");
 
         // New fixture instance per test, so create another stricter order and verify not needed.
@@ -190,7 +190,7 @@ contract AutomatedTradingTest is Test {
         );
         vm.stopPrank();
 
-        (bool neededSecond,) = trader.checkUpkeep("");
+        (bool neededSecond,) = _checkUpkeep();
         assertFalse(neededSecond, "price below threshold should not trigger");
     }
 
@@ -213,7 +213,7 @@ contract AutomatedTradingTest is Test {
             0
         );
 
-        (bool needed,) = trader.checkUpkeep("");
+        (bool needed,) = _checkUpkeep();
         assertTrue(needed, "mapped feed should make order executable");
     }
 
@@ -258,7 +258,7 @@ contract AutomatedTradingTest is Test {
             0
         );
 
-        (bool staleNeeded,) = trader.checkUpkeep("");
+        (bool staleNeeded,) = _checkUpkeep();
         assertFalse(staleNeeded, "stale feed should not trigger");
 
         vm.prank(owner);
@@ -281,7 +281,7 @@ contract AutomatedTradingTest is Test {
             0
         );
 
-        (bool invalidNeeded,) = trader.checkUpkeep("");
+        (bool invalidNeeded,) = _checkUpkeep();
         assertFalse(invalidNeeded, "invalid feed answer should not trigger");
     }
 
@@ -302,7 +302,7 @@ contract AutomatedTradingTest is Test {
             0
         );
 
-        (bool needed,) = trader.checkUpkeep("");
+        (bool needed,) = _checkUpkeep();
         assertTrue(needed, "balance order should trigger when threshold met");
     }
 
@@ -364,19 +364,19 @@ contract AutomatedTradingTest is Test {
         vm.prank(owner);
         trader.pauseOrder(0, true);
 
-        (bool neededPaused,) = trader.checkUpkeep("");
+        (bool neededPaused,) = _checkUpkeep();
         assertFalse(neededPaused, "paused order should be skipped");
 
         vm.prank(owner);
         trader.pauseOrder(0, false);
 
-        (bool neededUnpaused,) = trader.checkUpkeep("");
+        (bool neededUnpaused,) = _checkUpkeep();
         assertTrue(neededUnpaused, "unpaused order should trigger again");
 
         vm.prank(owner);
         trader.cancelOrder(0);
 
-        (bool neededCancelled,) = trader.checkUpkeep("");
+        (bool neededCancelled,) = _checkUpkeep();
         assertFalse(neededCancelled, "cancelled order should be skipped");
     }
 
@@ -395,7 +395,7 @@ contract AutomatedTradingTest is Test {
         AutomatedTrader.TradeOrder memory order = trader.getOrder(0);
         assertEq(order.executionCount, 0);
 
-        (bool upkeepNeeded,) = trader.checkUpkeep("");
+        (bool upkeepNeeded,) = _checkUpkeep();
         assertFalse(upkeepNeeded, "without LINK balance upkeep should not be needed");
     }
 
@@ -480,8 +480,14 @@ contract AutomatedTradingTest is Test {
         );
     }
 
+    function _checkUpkeep() internal returns (bool needed, bytes memory data) {
+        vm.startPrank(address(0), address(0));
+        (needed, data) = trader.checkUpkeep("");
+        vm.stopPrank();
+    }
+
     function _runUpkeepAndGetMessageId() internal returns (bytes32 messageId) {
-        (bool needed, bytes memory data) = trader.checkUpkeep("");
+        (bool needed, bytes memory data) = _checkUpkeep();
         assertTrue(needed, "upkeep should be needed");
 
         vm.recordLogs();

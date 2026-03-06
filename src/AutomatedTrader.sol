@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import {
-    AutomationCompatibleInterface
-} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {IRouterClient} from "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
@@ -15,7 +13,7 @@ import {IChainRegistry} from "./interfaces/IChainRegistry.sol";
 
 /// @title AutomatedTrader
 /// @notice Owner-operated automated cross-chain token execution powered by Chainlink Automation and CCIP.
-contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGuard {
+contract AutomatedTrader is AutomationCompatible, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error ZeroAddress();
@@ -256,7 +254,13 @@ contract AutomatedTrader is AutomationCompatibleInterface, Ownable, ReentrancyGu
         maxPriceAge = 1 hours;
     }
 
-    function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory performData) {
+    function checkUpkeep(bytes calldata)
+        external
+        view
+        override
+        cannotExecute
+        returns (bool upkeepNeeded, bytes memory performData)
+    {
         uint256 len = activeOrderIds.length;
         if (len == 0) return (false, "");
 

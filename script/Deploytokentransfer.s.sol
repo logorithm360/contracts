@@ -7,7 +7,7 @@ import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 import {TokenTransferSender} from "../src/TokenTransferSender.sol";
 import {TokenTransferReceiver} from "../src/TokenTransferReceiver.sol";
 
-/// @notice Deploys and configures TokenTransferSender on one of the 5 supported testnets.
+/// @notice Deploys and configures TokenTransferSender on a supported Chainlink CCIP network.
 ///
 /// Prerequisites:
 ///   1. Set LOCAL_CCIP_ROUTER and LOCAL_LINK_TOKEN for the source chain
@@ -27,7 +27,7 @@ contract DeployTokenSender is Script {
     function run() public returns (TokenTransferSender senderContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -55,7 +55,7 @@ contract DeployTokenSender is Script {
         senderContract = new TokenTransferSender(localRouter, localLink, payInLink);
 
         // Allowlist all supported destination chains except this one.
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 senderContract.allowlistDestinationChain(selectors[i], true);
@@ -124,7 +124,7 @@ contract DeployTokenSender is Script {
     }
 }
 
-/// @notice Deploys and configures TokenTransferReceiver on one of the 5 supported testnets.
+/// @notice Deploys and configures TokenTransferReceiver on a supported Chainlink CCIP network.
 ///
 /// Prerequisites:
 ///   1. Set LOCAL_CCIP_ROUTER for the destination chain
@@ -148,7 +148,7 @@ contract DeployTokenReceiver is Script {
     function run() public returns (TokenTransferReceiver receiverContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -165,7 +165,7 @@ contract DeployTokenReceiver is Script {
         receiverContract = new TokenTransferReceiver(localRouter);
 
         // Allowlist all supported source chains except this one.
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 receiverContract.allowlistSourceChain(selectors[i], true);
@@ -204,6 +204,21 @@ contract DeployTokenReceiver is Script {
     }
 
     function _tokenSenderBySelector(uint64 selector) internal view returns (address) {
+        if (selector == SupportedNetworks.ETHEREUM_MAINNET_SELECTOR) {
+            return vm.envOr("ETHEREUM_MAINNET_TOKEN_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.POLYGON_MAINNET_SELECTOR) {
+            return vm.envOr("POLYGON_MAINNET_TOKEN_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.ARBITRUM_MAINNET_SELECTOR) {
+            return vm.envOr("ARBITRUM_MAINNET_TOKEN_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.BASE_MAINNET_SELECTOR) {
+            return vm.envOr("BASE_MAINNET_TOKEN_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.OP_MAINNET_SELECTOR) {
+            return vm.envOr("OP_MAINNET_TOKEN_SENDER_CONTRACT", address(0));
+        }
         if (selector == SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR) {
             return vm.envOr("SEPOLIA_TOKEN_SENDER_CONTRACT", address(0));
         }
