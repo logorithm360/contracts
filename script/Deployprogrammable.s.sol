@@ -21,12 +21,12 @@ abstract contract ProgrammableEnvHelper is Script {
     }
 }
 
-/// @notice Deploys and configures ProgrammableTokenSender on one of the 5 supported testnets.
+/// @notice Deploys and configures ProgrammableTokenSender on a supported Chainlink CCIP network.
 contract DeployProgrammableSender is ProgrammableEnvHelper {
     function run() public returns (ProgrammableTokenSender senderContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -53,7 +53,7 @@ contract DeployProgrammableSender is ProgrammableEnvHelper {
 
         senderContract = new ProgrammableTokenSender(localRouter, localLink, payInLink);
 
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 senderContract.allowlistDestinationChain(selectors[i], true);
@@ -105,12 +105,12 @@ contract DeployProgrammableSender is ProgrammableEnvHelper {
     }
 }
 
-/// @notice Deploys and configures ProgrammableTokenReceiver on one of the 5 supported testnets.
+/// @notice Deploys and configures ProgrammableTokenReceiver on a supported Chainlink CCIP network.
 contract DeployProgrammableReceiver is ProgrammableEnvHelper {
     function run() public returns (ProgrammableTokenReceiver receiverContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -126,7 +126,7 @@ contract DeployProgrammableReceiver is ProgrammableEnvHelper {
 
         receiverContract = new ProgrammableTokenReceiver(localRouter);
 
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 receiverContract.allowlistSourceChain(selectors[i], true);
@@ -149,6 +149,21 @@ contract DeployProgrammableReceiver is ProgrammableEnvHelper {
     }
 
     function _programmableSenderBySelector(uint64 selector) internal view returns (address) {
+        if (selector == SupportedNetworks.ETHEREUM_MAINNET_SELECTOR) {
+            return vm.envOr("ETHEREUM_MAINNET_PROGRAMMABLE_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.POLYGON_MAINNET_SELECTOR) {
+            return vm.envOr("POLYGON_MAINNET_PROGRAMMABLE_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.ARBITRUM_MAINNET_SELECTOR) {
+            return vm.envOr("ARBITRUM_MAINNET_PROGRAMMABLE_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.BASE_MAINNET_SELECTOR) {
+            return vm.envOr("BASE_MAINNET_PROGRAMMABLE_SENDER_CONTRACT", address(0));
+        }
+        if (selector == SupportedNetworks.OP_MAINNET_SELECTOR) {
+            return vm.envOr("OP_MAINNET_PROGRAMMABLE_SENDER_CONTRACT", address(0));
+        }
         if (selector == SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR) {
             return vm.envOr("SEPOLIA_PROGRAMMABLE_SENDER_CONTRACT", address(0));
         }

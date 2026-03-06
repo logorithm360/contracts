@@ -55,7 +55,7 @@ Use these IDs in CRE storage and logs:
 - `sourceChainSelector` + `senderContract` (security context)
 
 Recommended workflow state key:
-- `feature4:<ccipMessageId>`
+- `chainAlert:<ccipMessageId>`
 
 ---
 
@@ -207,8 +207,27 @@ Handling pattern:
 ---
 
 ## 13. Relationship to Existing Docs
-- `FEATURE-4.MD`: contract internals and architecture
-- `FEATURE-4-USAGE.md`: operator command runbook
+- `chainAlert.MD`: contract internals and architecture
+- `chainAlert-USAGE.md`: operator command runbook
 - `CRE_WORKFLOW_INTEGRATION.md`: project-wide workflow overview
 
 This file is the Feature 4-specific CRE developer integration reference.
+
+---
+
+## 14. Intelligence Workflow Additions (Feature 4, additive)
+
+In addition to execution-lifecycle tracking, Feature 4 now supports a dedicated intelligence workflow that evaluates alert rules and writes state transitions to `ChainAlertRegistry`.
+
+HTTP ops actions:
+- `UPSERT_RULE`
+- `ENABLE_RULE`
+- `LIST_RULES`
+- `RUN_EVALUATION_ONCE`
+
+Trigger topology:
+- Cron checks for full taxonomy categories (portfolio/token/DCA/wallet)
+- EVM log trigger on `AutomatedTrader` DCA events for near-real-time DCA alert checks
+
+Backward compatibility:
+- Existing `AutomatedTrader` and `autopilot` execution paths remain unchanged.

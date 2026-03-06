@@ -247,3 +247,19 @@ forge test --match-contract TokenTransferTest -vvv
 5. Register upkeep and set forwarder.
 6. Create orders (timed, price, balance).
 7. Monitor source and destination events for execution and pending actions.
+
+## 12. Feature 4 Intelligence Overlay (Additive)
+Feature 4 now includes an additive monitoring layer and **does not replace** `AutomatedTrader`.
+
+New on-chain component:
+- `src/ChainAlertRegistry.sol`
+  - user-owned alert rules (`upsertRule`, `setRuleEnabled`)
+  - workflow-only runtime state writes (`recordEvaluation`, `recordTrigger`, `recordResolve`)
+  - dedup/cooldown/rearm state model per rule
+
+This keeps all existing automated-trading execution interfaces stable for other dependent features.
+
+New script support:
+- `script/DeploychainAlertRegistry.s.sol`
+  - `DeployChainAlertRegistry`
+  - `ConfigureFeature4AlertWorkflowAuthorizer`

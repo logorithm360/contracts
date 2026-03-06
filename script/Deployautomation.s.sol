@@ -21,12 +21,12 @@ abstract contract AutomationReceiverEnvHelper is Script {
     }
 }
 
-/// @notice Deploys AutomatedTrader on Ethereum Sepolia and preconfigures destination/token allowlists.
+/// @notice Deploys AutomatedTrader and preconfigures destination/token allowlists for the current environment.
 contract DeployAutomatedTrader is Script {
     function run() external returns (AutomatedTrader traderContract) {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "DeployAutomatedTrader must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address localRouter = vm.envAddress("LOCAL_CCIP_ROUTER");
@@ -49,7 +49,7 @@ contract DeployAutomatedTrader is Script {
         traderContract = new AutomatedTrader(localRouter, localLink);
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 traderContract.allowlistDestinationChain(selectors[i], true);
@@ -106,8 +106,8 @@ contract DeployAutomatedTrader is Script {
 contract SetAutomatedForwarder is Script {
     function run() external {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "SetAutomatedForwarder must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -131,8 +131,11 @@ contract ConfigureAutomatedSenderOnReceiver is AutomationReceiverEnvHelper {
         address receiverAddr = _loadAutomatedReceiverAddress();
         address automatedSender = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
 
-        uint64 sourceSelector =
-            uint64(vm.envOr("AUTOMATED_SOURCE_SELECTOR", uint256(SupportedNetworks.ETHEREUM_SEPOLIA_SELECTOR)));
+        uint64 sourceSelector = uint64(
+            vm.envOr(
+                "AUTOMATED_SOURCE_SELECTOR", uint256(SupportedNetworks.defaultEthereumSelectorForChain(block.chainid))
+            )
+        );
         bool enableManualActionMode = vm.envOr("AUTOMATED_ENABLE_MANUAL_ACTION_MODE", true);
 
         require(receiverAddr != address(0), "AUTOMATED_RECEIVER_CONTRACT not set");
@@ -158,8 +161,8 @@ contract ConfigureAutomatedSenderOnReceiver is AutomationReceiverEnvHelper {
 contract CreateTimedOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "CreateTimedOrder must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -222,8 +225,8 @@ contract CreateTimedOrder is AutomationReceiverEnvHelper {
 contract CreatePriceOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "CreatePriceOrder must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -286,8 +289,8 @@ contract CreatePriceOrder is AutomationReceiverEnvHelper {
 contract SetTokenPriceFeed is Script {
     function run() external {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "SetTokenPriceFeed must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -314,8 +317,8 @@ contract SetTokenPriceFeed is Script {
 contract CreateBalanceOrder is AutomationReceiverEnvHelper {
     function run() external returns (uint256 orderId) {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "CreateBalanceOrder must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -368,8 +371,8 @@ contract CreateBalanceOrder is AutomationReceiverEnvHelper {
 contract CheckAutomationStatus is Script {
     function run() external view {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "CheckAutomationStatus must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");
@@ -405,8 +408,8 @@ contract CheckAutomationStatus is Script {
 contract TriggerAutomationUpkeep is Script {
     function run() external {
         require(
-            block.chainid == SupportedNetworks.ETHEREUM_SEPOLIA_CHAIN_ID,
-            "TriggerAutomationUpkeep must run on Ethereum Sepolia"
+            SupportedNetworks.isSupportedChainId(block.chainid),
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         address traderAddr = vm.envAddress("AUTOMATED_TRADER_CONTRACT");

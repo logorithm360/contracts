@@ -6,7 +6,7 @@ import {MessagingSender} from "../src/MessageSender.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import {SupportedNetworks} from "./utils/SupportedNetworks.sol";
 
-/// @notice Deploys and configures MessagingSender on one of the 5 supported testnets.
+/// @notice Deploys and configures MessagingSender on a supported Chainlink CCIP network.
 ///
 /// Prerequisites:
 ///   1. Set LOCAL_CCIP_ROUTER and LOCAL_LINK_TOKEN in your .env for the target chain
@@ -26,7 +26,7 @@ contract DeploySender is Script {
     function run() public returns (MessagingSender senderContract) {
         require(
             SupportedNetworks.isSupportedChainId(block.chainid),
-            "Unsupported chain: use Sepolia/Amoy/Arb Sepolia/Base Sepolia/OP Sepolia"
+            "Unsupported chain: use supported mainnet/testnet chain"
         );
 
         uint64 localSelector = SupportedNetworks.selectorByChainId(block.chainid);
@@ -50,7 +50,7 @@ contract DeploySender is Script {
         senderContract = new MessagingSender(localRouter, localLink, payInLink);
 
         // Allowlist all supported destination chains except this chain.
-        uint64[5] memory selectors = SupportedNetworks.allSelectors();
+        uint64[5] memory selectors = SupportedNetworks.allSelectorsForChainId(block.chainid);
         for (uint256 i = 0; i < selectors.length; i++) {
             if (selectors[i] != localSelector) {
                 senderContract.allowlistDestinationChain(selectors[i], true);

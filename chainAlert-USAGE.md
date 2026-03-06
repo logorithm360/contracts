@@ -288,3 +288,39 @@ Search that message ID on:
 4. Trigger upkeep
 5. Wait for CCIP finality
 6. Verify count + recipient token balance
+
+---
+
+## Feature 4 Intelligence Registry Quick Ops
+
+Deploy:
+
+```bash
+forge script script/DeploychainAlertRegistry.s.sol:DeployChainAlertRegistry --rpc-url sepolia --broadcast
+```
+
+Configure all workflow permissions (Feature 4 + Feature 5 + Feature 6):
+
+```bash
+CHAINALERT_REGISTRY_CONTRACT=<registry> \
+CHAINALERT_WORKFLOW_ADDRESS=<workflow_address> \
+CHAINALERT_WORKFLOW_ENABLED=true \
+USER_RECORD_REGISTRY_CONTRACT=<feature5_registry> \
+SECURITY_MANAGER_CONTRACT=<feature6_security_manager> \
+CHAINALERT_ENABLE_FEATURE5_WRITER=true \
+CHAINALERT_ENABLE_FEATURE6_CALLER=true \
+forge script script/DeploychainAlertRegistry.s.sol:ConfigureChainAlertSystemAccess --rpc-url sepolia --broadcast
+```
+
+Verify configured permissions:
+
+```bash
+CHAINALERT_REGISTRY_CONTRACT=<registry> \
+CHAINALERT_WORKFLOW_ADDRESS=<workflow_address> \
+USER_RECORD_REGISTRY_CONTRACT=<feature5_registry> \
+SECURITY_MANAGER_CONTRACT=<feature6_security_manager> \
+forge script script/DeploychainAlertRegistry.s.sol:VerifyChainAlertSystemAccess --rpc-url sepolia
+```
+
+Note:
+- This is additive; automated trading order creation/execution runbook remains exactly the same.
