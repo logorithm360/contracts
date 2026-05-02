@@ -71,6 +71,28 @@ forge test --match-contract TokenTransferForkTest -vvv
 forge build
 ```
 
+Important:
+- `forge build` does not require a fork RPC.
+- If you see `error: a value is required for '--fork-url <URL>' but none was supplied`, the problem is not the Solidity build itself. It means your shell command, alias, or wrapper added `--fork-url` with an empty value.
+- Run plain `forge build` for compilation only.
+- Only fork-based tests need RPC URLs in this repo, specifically `ETHEREUM_SEPOLIA_RPC_URL` and `POLYGON_AMOY_RPC_URL`.
+
+### Fork test prerequisites
+
+These tests use live chain forks:
+
+```bash
+forge test --match-contract MessagingForkTest -vvv
+forge test --match-contract TokenTransferForkTest -vvv
+```
+
+Before running them, export the required RPC URLs:
+
+```bash
+export ETHEREUM_SEPOLIA_RPC_URL="https://your-sepolia-rpc"
+export POLYGON_AMOY_RPC_URL="https://your-amoy-rpc"
+```
+
 ## 4. Script Execution Discipline
 
 For every script, follow this order:
